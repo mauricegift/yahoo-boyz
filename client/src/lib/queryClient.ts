@@ -3,6 +3,23 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
+    
+    // Handle disabled user - auto logout on 403 with access denied message
+    if (res.status === 403 && text.includes("Access denied")) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.location.href = "/login";
+      throw new Error("Access denied. Please contact administrator.");
+    }
+    
+    // Handle token expired or unauthorized - auto logout on 401
+    if (res.status === 401 || text.toLowerCase().includes("unauthorized") || text.toLowerCase().includes("token expired") || text.toLowerCase().includes("jwt expired")) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      window.location.href = "/";
+      throw new Error("Session expired. Please login again.");
+    }
+    
     throw new Error(`${res.status}: ${text}`);
   }
 }

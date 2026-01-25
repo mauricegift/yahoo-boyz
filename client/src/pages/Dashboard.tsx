@@ -58,6 +58,11 @@ interface DashboardStats {
   activeLoans: number;
   pendingContributions: number;
   missedContributions: MissedContribution[];
+  daysCovered: number;
+  daysElapsed: number;
+  daysAhead: number;
+  daysBehind: number;
+  nextContributionTime: string | null;
 }
 
 interface ContributionsResponse {
@@ -90,6 +95,8 @@ export default function Dashboard() {
   const [pendingCheckoutId, setPendingCheckoutId] = useState<string | null>(
     null,
   );
+  const [missedContributionDialogOpen, setMissedContributionDialogOpen] = useState(false);
+  const [missedContributionPhone, setMissedContributionPhone] = useState(user?.phone || "");
 
   const {
     data: stats,
@@ -207,15 +214,20 @@ export default function Dashboard() {
     };
   }, [pendingContribution, queryClient]);
 
-  // Calculate countdown until next contribution
+  // Calculate countdown until next contribution using exact 24-hour window from backend
   useEffect(() => {
-    if (hasContributedToday) {
+    if (stats?.nextContributionTime) {
       const updateCountdown = () => {
         const now = new Date();
-        const tomorrow = addDays(new Date(), 1);
-        tomorrow.setHours(0, 0, 0, 0);
+        const nextTime = new Date(stats.nextContributionTime!);
 
-        const diffMs = differenceInMilliseconds(tomorrow, now);
+        const diffMs = nextTime.getTime() - now.getTime();
+        
+        if (diffMs <= 0) {
+          setTimeUntilNextContribution("Now available");
+          return;
+        }
+        
         const hours = Math.floor(diffMs / (1000 * 60 * 60));
         const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
         const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
@@ -228,7 +240,7 @@ export default function Dashboard() {
 
       return () => clearInterval(interval);
     }
-  }, [hasContributedToday]);
+  }, [stats?.nextContributionTime]);
 
   const contributeMutation = useMutation({
     mutationFn: async (data: { amount: number; phone?: string }) => {
@@ -291,6 +303,31 @@ export default function Dashboard() {
     },
   });
 
+  const payMissedContributionsMutation = useMutation({
+    mutationFn: async (data: { amount: number; phone?: string }) => {
+      return apiRequest("POST", "/api/contributions/pay-missed", data);
+    },
+    onSuccess: (data) => {
+      if (data.success && data.checkoutRequestId) {
+        toast.success(data.message || "Check your phone for M-Pesa prompt", {
+          closeButton: true,
+        });
+        setMissedContributionDialogOpen(false);
+        queryClient.invalidateQueries({ queryKey: ["/api/contributions/user"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      } else {
+        toast.error(data.message || "Failed to initiate payment", {
+          closeButton: true,
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Failed to initiate payment", {
+        closeButton: true,
+      });
+    },
+  });
+
   const handleRefresh = () => {
     refetchStats();
     refetchContributions();
@@ -306,6 +343,16 @@ export default function Dashboard() {
 
   const totalUserBalance =
     (stats?.userTotal || 0) + (stats?.userTotalSavings || 0);
+
+  const outstandingLoanAmount = loans
+    ?.filter((l) => l.status === "approved" || l.status === "overdue")
+    .reduce((sum, loan) => sum + (Number(loan.totalAmount || 0) - Number(loan.amountPaid || 0)), 0) || 0;
+
+  const failedContribution = contributions?.find(
+    (contribution) =>
+      isToday(new Date(contribution.createdAt)) &&
+      contribution.status === "failed",
+  );
 
   // Format numbers safely
   const formatNumber = (num: number | undefined) => {
@@ -466,72 +513,161 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className={stats?.daysAhead && stats.daysAhead > 0 ? "border-green-500/30 bg-green-500/5" : stats?.daysBehind && stats.daysBehind > 0 ? "border-red-500/30 bg-red-500/5" : ""}>
               <CardContent className="pt-6">
                 <div className="flex items-center gap-4">
-                  <div className="p-3 rounded-xl bg-destructive/10">
-                    <AlertCircle className="h-6 w-6 text-destructive" />
+                  <div className={`p-3 rounded-xl ${stats?.daysAhead && stats.daysAhead > 0 ? "bg-green-500/10" : stats?.daysBehind && stats.daysBehind > 0 ? "bg-destructive/10" : "bg-blue-500/10"}`}>
+                    {stats?.daysAhead && stats.daysAhead > 0 ? (
+                      <TrendingUp className="h-6 w-6 text-green-500" />
+                    ) : stats?.daysBehind && stats.daysBehind > 0 ? (
+                      <AlertCircle className="h-6 w-6 text-destructive" />
+                    ) : (
+                      <CheckCircle className="h-6 w-6 text-blue-500" />
+                    )}
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">
-                      Missed Contribution Days
+                      Contribution Status
                     </p>
                     {statsLoading ? (
                       <Skeleton className="h-8 w-16" />
                     ) : (
                       <p
-                        className="text-2xl font-bold"
-                        data-testid="text-missed-days"
+                        className={`text-2xl font-bold ${stats?.daysAhead && stats.daysAhead > 0 ? "text-green-600" : stats?.daysBehind && stats.daysBehind > 0 ? "text-red-600" : "text-blue-600"}`}
+                        data-testid="text-contribution-status"
                       >
-                        {stats?.missedContributions?.length || 0}
+                        {stats?.daysAhead && stats.daysAhead > 0 
+                          ? `${stats.daysAhead} days ahead` 
+                          : stats?.daysBehind && stats.daysBehind > 0 
+                            ? `${stats.daysBehind} days behind`
+                            : "On track"}
                       </p>
                     )}
                   </div>
                 </div>
               </CardContent>
             </Card>
-          </div>
 
-          {/* Missed Contributions Alert */}
-          {stats?.missedContributions &&
-            stats.missedContributions.length > 0 && (
-              <Card className="mb-8 border-destructive/50 bg-destructive/5">
+            {outstandingLoanAmount > 0 && (
+              <Card className="border-orange-500/30 bg-orange-500/5">
                 <CardContent className="pt-6">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                      <AlertCircle className="h-5 w-5 text-destructive mt-0.5" />
-                      <div>
-                        <h3 className="font-semibold text-destructive">
-                          Missed Contributions
-                        </h3>
-                        <p className="text-sm text-muted-foreground">
-                          You have {stats.missedContributions.length} unpaid
-                          penalty(ies) totaling{" "}
-                          <span className="font-mono font-semibold">
-                            Ksh{" "}
-                            {stats.missedContributions
-                              .reduce(
-                                (sum, m) => sum + Number(m.penaltyAmount),
-                                0,
-                              )
-                              .toLocaleString()}
-                          </span>
-                        </p>
-                      </div>
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 rounded-xl bg-orange-500/10">
+                      <Banknote className="h-6 w-6 text-orange-500" />
                     </div>
-                    <Link href="/contributions">
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        data-testid="button-pay-penalties"
-                      >
-                        Pay Penalties
-                      </Button>
-                    </Link>
+                    <div>
+                      <p className="text-sm text-muted-foreground">
+                        My Outstanding Loan
+                      </p>
+                      {loansLoading ? (
+                        <Skeleton className="h-8 w-24" />
+                      ) : (
+                        <p
+                          className="text-2xl font-bold font-mono text-orange-600"
+                          data-testid="text-outstanding-loan"
+                        >
+                          Ksh {formatNumber(outstandingLoanAmount)}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
             )}
+          </div>
+
+          {/* Days Behind Alert with Pay Button */}
+          {stats?.daysBehind && stats.daysBehind > 0 && (
+            <Card className="mb-8 border-destructive/50 bg-destructive/5">
+              <CardContent className="pt-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-destructive mt-0.5" />
+                    <div>
+                      <h3 className="font-semibold text-destructive">
+                        Missed Contributions
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        You have {stats.daysBehind} missed day(s) totaling{" "}
+                        <span className="font-mono font-semibold">
+                          Ksh {(stats.daysBehind * 20).toLocaleString()}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                  <Dialog open={missedContributionDialogOpen} onOpenChange={setMissedContributionDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        data-testid="button-pay-missed"
+                      >
+                        Pay Missed Contributions
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Pay Missed Contributions</DialogTitle>
+                        <DialogDescription>
+                          You have {stats.daysBehind} missed day(s). Each day costs Ksh 20.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4 py-4">
+                        <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Missed Days</span>
+                            <span className="font-bold">{stats.daysBehind} days</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Amount per Day</span>
+                            <span className="font-mono">Ksh 20</span>
+                          </div>
+                          <div className="border-t pt-2 flex justify-between">
+                            <span className="font-semibold">Total Amount</span>
+                            <span className="font-mono font-bold text-destructive">
+                              Ksh {(stats.daysBehind * 20).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">M-Pesa Phone Number</label>
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4 text-muted-foreground" />
+                            <Input
+                              placeholder="254712345678"
+                              value={missedContributionPhone}
+                              onChange={(e) => setMissedContributionPhone(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <Button
+                          className="w-full"
+                          variant="destructive"
+                          disabled={payMissedContributionsMutation.isPending}
+                          onClick={() => {
+                            const amount = stats.daysBehind * 20;
+                            payMissedContributionsMutation.mutate({
+                              amount,
+                              phone: missedContributionPhone || undefined,
+                            });
+                          }}
+                        >
+                          {payMissedContributionsMutation.isPending ? (
+                            <>
+                              <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                              Processing...
+                            </>
+                          ) : (
+                            `Pay Ksh ${(stats.daysBehind * 20).toLocaleString()}`
+                          )}
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Quick Actions - Full Width at Top */}
           <Card className="mb-6">
@@ -576,6 +712,79 @@ export default function Dashboard() {
                         )}
                       </p>
                     </div>
+                  </div>
+                </div>
+              ) : failedContribution ? (
+                <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                      <div>
+                        <p className="font-medium text-red-800 dark:text-red-300">
+                          Contribution Due - Payment Failed
+                        </p>
+                        <p className="text-sm text-red-600 dark:text-red-400">
+                          Your daily contribution payment failed. Please retry.
+                        </p>
+                      </div>
+                    </div>
+                    <Dialog
+                      open={contributionDialogOpen}
+                      onOpenChange={setContributionDialogOpen}
+                    >
+                      <DialogTrigger asChild>
+                        <Button variant="destructive" size="sm" className="gap-2">
+                          <RefreshCw className="h-4 w-4" />
+                          Retry Payment
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Retry Daily Contribution</DialogTitle>
+                          <DialogDescription>
+                            Retry your Ksh 20 daily contribution via M-Pesa
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                          <div>
+                            <label className="text-sm font-medium">
+                              M-Pesa Phone Number
+                            </label>
+                            <div className="relative mt-1.5">
+                              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                              <Input
+                                value={phoneNumber}
+                                onChange={(e) => setPhoneNumber(e.target.value)}
+                                placeholder="0712345678"
+                                className="pl-10"
+                              />
+                            </div>
+                          </div>
+                          <div className="bg-muted/50 rounded-lg p-4">
+                            <div className="flex justify-between items-center">
+                              <span className="text-muted-foreground">Amount</span>
+                              <span className="text-2xl font-bold font-mono">
+                                Ksh 20
+                              </span>
+                            </div>
+                          </div>
+                          <Button
+                            className="w-full"
+                            onClick={() =>
+                              contributeMutation.mutate({
+                                amount: 20,
+                                phone: phoneNumber,
+                              })
+                            }
+                            disabled={contributeMutation.isPending}
+                          >
+                            {contributeMutation.isPending
+                              ? "Processing..."
+                              : "Retry with M-Pesa"}
+                          </Button>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                   </div>
                 </div>
               ) : (
@@ -865,22 +1074,69 @@ export default function Dashboard() {
                             )}
                           </div>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right flex flex-col items-end gap-1">
                           <p className="font-mono font-semibold">
                             Ksh {Number(contribution.amount).toLocaleString()}
                           </p>
-                          <Badge
-                            variant={
-                              contribution.status === "completed"
-                                ? "default"
-                                : contribution.status === "pending"
-                                  ? "secondary"
-                                  : "destructive"
-                            }
-                            className="text-xs"
-                          >
-                            {contribution.status}
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant={
+                                contribution.status === "completed"
+                                  ? "default"
+                                  : contribution.status === "pending"
+                                    ? "secondary"
+                                    : "destructive"
+                              }
+                              className="text-xs"
+                            >
+                              {contribution.status}
+                            </Badge>
+                            {contribution.status === "failed" && (
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <Button variant="outline" size="sm" className="h-6 text-xs gap-1 px-2">
+                                    <RefreshCw className="h-3 w-3" />
+                                    Retry
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent>
+                                  <DialogHeader>
+                                    <DialogTitle>Retry Contribution</DialogTitle>
+                                    <DialogDescription>
+                                      Retry your Ksh 20 contribution via M-Pesa
+                                    </DialogDescription>
+                                  </DialogHeader>
+                                  <div className="space-y-4 py-4">
+                                    <div>
+                                      <label className="text-sm font-medium">M-Pesa Phone Number</label>
+                                      <div className="relative mt-1.5">
+                                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                        <Input
+                                          value={phoneNumber}
+                                          onChange={(e) => setPhoneNumber(e.target.value)}
+                                          placeholder="0712345678"
+                                          className="pl-10"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="bg-muted/50 rounded-lg p-4">
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-muted-foreground">Amount</span>
+                                        <span className="text-2xl font-bold font-mono">Ksh 20</span>
+                                      </div>
+                                    </div>
+                                    <Button
+                                      className="w-full"
+                                      onClick={() => contributeMutation.mutate({ amount: 20, phone: phoneNumber })}
+                                      disabled={contributeMutation.isPending}
+                                    >
+                                      {contributeMutation.isPending ? "Processing..." : "Retry with M-Pesa"}
+                                    </Button>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1031,22 +1287,75 @@ export default function Dashboard() {
                             )}
                           </div>
                         </div>
-                        <div className="text-right">
+                        <div className="text-right flex flex-col items-end gap-1">
                           <p className="font-mono font-semibold">
                             Ksh {Number(saving.amount).toLocaleString()}
                           </p>
-                          <Badge
-                            variant={
-                              saving.status === "completed"
-                                ? "default"
-                                : saving.status === "pending"
-                                  ? "secondary"
-                                  : "destructive"
-                            }
-                            className="text-xs"
-                          >
-                            {saving.status}
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant={
+                                saving.status === "completed"
+                                  ? "default"
+                                  : saving.status === "pending"
+                                    ? "secondary"
+                                    : "destructive"
+                              }
+                              className="text-xs"
+                            >
+                              {saving.status}
+                            </Badge>
+                            {saving.status === "failed" && (
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <Button variant="outline" size="sm" className="h-6 text-xs gap-1 px-2">
+                                    <RefreshCw className="h-3 w-3" />
+                                    Retry
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent>
+                                  <DialogHeader>
+                                    <DialogTitle>Retry Savings</DialogTitle>
+                                    <DialogDescription>
+                                      Retry your savings deposit via M-Pesa
+                                    </DialogDescription>
+                                  </DialogHeader>
+                                  <div className="space-y-4 py-4">
+                                    <div>
+                                      <label className="text-sm font-medium">M-Pesa Phone Number</label>
+                                      <div className="relative mt-1.5">
+                                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                        <Input
+                                          value={phoneNumber}
+                                          onChange={(e) => setPhoneNumber(e.target.value)}
+                                          placeholder="0712345678"
+                                          className="pl-10"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="bg-muted/50 rounded-lg p-4">
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-muted-foreground">Amount</span>
+                                        <span className="text-2xl font-bold font-mono">
+                                          Ksh {Number(saving.amount).toLocaleString()}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <Button
+                                      className="w-full"
+                                      onClick={() => saveMutation.mutate({
+                                        amount: Number(saving.amount),
+                                        description: saving.description || "Savings",
+                                        phone: phoneNumber,
+                                      })}
+                                      disabled={saveMutation.isPending}
+                                    >
+                                      {saveMutation.isPending ? "Processing..." : "Retry with M-Pesa"}
+                                    </Button>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}

@@ -55,11 +55,13 @@ export default function Savings() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [savingsDialogOpen, setSavingsDialogOpen] = useState(false);
+  const [retryDialogOpen, setRetryDialogOpen] = useState(false);
+  const [selectedSaving, setSelectedSaving] = useState<Saving | null>(null);
   const [phoneNumber, setPhoneNumber] = useState(user?.phone || "");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [page, setPage] = useState(1);
-  const limit = 15;
+  const limit = 20;
 
   const {
     data: stats,
@@ -99,6 +101,8 @@ export default function Savings() {
           closeButton: true,
         });
         setSavingsDialogOpen(false);
+        setRetryDialogOpen(false);
+        setSelectedSaving(null);
         setAmount("");
         setDescription("");
         queryClient.invalidateQueries({ queryKey: ["/api/savings/stats"] });
@@ -381,6 +385,20 @@ export default function Savings() {
                           >
                             {saving.status}
                           </Badge>
+                          {saving.status === "failed" && (
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="gap-1"
+                              onClick={() => {
+                                setSelectedSaving(saving);
+                                setRetryDialogOpen(true);
+                              }}
+                            >
+                              <RefreshCw className="h-3 w-3" />
+                              Retry
+                            </Button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -433,6 +451,62 @@ export default function Savings() {
           </Card>
         </div>
       </main>
+
+      {/* Retry Savings Dialog */}
+      <Dialog open={retryDialogOpen} onOpenChange={setRetryDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Retry Savings</DialogTitle>
+            <DialogDescription>
+              Retry your savings deposit via M-Pesa
+            </DialogDescription>
+          </DialogHeader>
+          {selectedSaving && (
+            <div className="space-y-4 py-4">
+              <div>
+                <label className="text-sm font-medium">
+                  M-Pesa Phone Number
+                </label>
+                <div className="relative mt-1.5">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="0712345678"
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+              <div className="bg-muted/50 rounded-lg p-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">Amount</span>
+                  <span className="text-2xl font-bold font-mono">
+                    Ksh {Number(selectedSaving.amount).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+              <Button
+                className="w-full gap-2"
+                onClick={() =>
+                  saveMutation.mutate({
+                    amount: Number(selectedSaving.amount),
+                    description: selectedSaving.description || "Savings",
+                    phone: phoneNumber,
+                  })
+                }
+                disabled={saveMutation.isPending}
+              >
+                {saveMutation.isPending && (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                )}
+                {saveMutation.isPending
+                  ? "Sending M-Pesa request..."
+                  : "Retry with M-Pesa"}
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Footer />
     </div>

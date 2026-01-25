@@ -3,6 +3,7 @@ import {
   useContext,
   useState,
   useEffect,
+  useCallback,
   ReactNode,
 } from "react";
 import { useLocation } from "wouter";
@@ -14,6 +15,7 @@ interface AuthContextType {
   login: (user: User, token: string) => void;
   logout: () => void;
   updateUser: (updatedUser: User) => void;
+  refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
 }
 
@@ -52,6 +54,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("user", JSON.stringify(updatedUser));
   };
 
+  const refreshUser = useCallback(async () => {
+    const savedToken = localStorage.getItem("token");
+    if (!savedToken) return;
+
+    try {
+      const response = await fetch("/api/user/me", {
+        headers: {
+          Authorization: `Bearer ${savedToken}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.user) {
+          setUser(data.user);
+          localStorage.setItem("user", JSON.stringify(data.user));
+        }
+      } else if (response.status === 401 || response.status === 403) {
+        logout();
+      }
+    } catch (error) {
+      console.error("Failed to refresh user:", error);
+    }
+  }, []);
+
   useEffect(() => {
     const savedToken = localStorage.getItem("token");
     const savedUser = localStorage.getItem("user");
@@ -59,14 +85,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (savedToken && savedUser) {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
+      // Refresh user data from server on page load
+      refreshUser();
     }
-  }, []);
+
+    // Refresh user data when tab becomes visible (catches role changes)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && localStorage.getItem("token")) {
+        refreshUser();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [refreshUser]);
 
   const isAuthenticated = !!user && !!token;
 
   return (
     <AuthContext.Provider
-      value={{ user, token, login, logout, updateUser, isAuthenticated }}
+      value={{ user, token, login, logout, updateUser, refreshUser, isAuthenticated }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,7 +1,9 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import ReactCrop, { Crop, PixelCrop, centerCrop, makeAspectCrop } from "react-image-crop";
+import "react-image-crop/dist/ReactCrop.css";
 import {
   User,
   Phone,
@@ -12,6 +14,9 @@ import {
   CheckCircle,
   Settings,
   CreditCard,
+  Loader2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { z } from "zod";
@@ -36,8 +41,18 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { PageTransition } from "@/components/ui/page-transition";
+import { PasswordStrength } from "@/components/ui/password-strength";
 import { useAuth } from "@/lib/auth";
 import { apiRequest } from "@/lib/queryClient";
 import { format } from "date-fns";
@@ -50,8 +65,13 @@ const profileSchema = z.object({
 const passwordSchema = z
   .object({
     currentPassword: z.string().min(1, "Current password is required"),
-    newPassword: z.string().min(6, "Password must be at least 6 characters"),
-    confirmPassword: z.string().min(6, "Please confirm your password"),
+    newPassword: z.string()
+      .min(8, "Password must be at least 8 characters")
+      .refine((val) => /[A-Z]/.test(val), "Password must contain an uppercase letter")
+      .refine((val) => /[a-z]/.test(val), "Password must contain a lowercase letter")
+      .refine((val) => /\d/.test(val), "Password must contain a number")
+      .refine((val) => /[!@#$%^&*(),.?":{}|<>]/.test(val), "Password must contain a special character"),
+    confirmPassword: z.string().min(1, "Please confirm your password"),
   })
   .refine((data) => data.newPassword === data.confirmPassword, {
     message: "Passwords don't match",
@@ -60,11 +80,51 @@ const passwordSchema = z
 
 type TabValue = "profile" | "security";
 
+function centerAspectCrop(
+  mediaWidth: number,
+  mediaHeight: number,
+  aspect: number,
+) {
+  return centerCrop(
+    makeAspectCrop(
+      {
+        unit: '%',
+        width: 90,
+      },
+      aspect,
+      mediaWidth,
+      mediaHeight,
+    ),
+    mediaWidth,
+    mediaHeight,
+  );
+}
+
 export default function Profile() {
   const { user, updateUser } = useAuth();
   const [isUploading, setIsUploading] = useState(false);
   const [activeTab, setActiveTab] = useState<TabValue>("profile");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  
+  // Image cropping state
+  const [cropDialogOpen, setCropDialogOpen] = useState(false);
+  const [imageSrc, setImageSrc] = useState<string>("");
+  const [crop, setCrop] = useState<Crop>();
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
+
+  // Fetch fresh user data from server
+  const { data: freshUserData } = useQuery({
+    queryKey: ["/api/user/me"],
+    enabled: !!user,
+  });
+
+  // Update local user data when fresh data is fetched
+  useEffect(() => {
+    if (freshUserData) {
+      updateUser(freshUserData as any);
+    }
+  }, [freshUserData]);
 
   const profileForm = useForm<z.infer<typeof profileSchema>>({
     resolver: zodResolver(profileSchema),
@@ -84,14 +144,14 @@ export default function Profile() {
   });
 
   // Update form values when user changes
-  useState(() => {
+  useEffect(() => {
     if (user) {
       profileForm.reset({
         name: user.name,
         phone: user.phone,
       });
     }
-  });
+  }, [user?.name, user?.phone]);
 
   const updateProfileMutation = useMutation({
     mutationFn: async (data: z.infer<typeof profileSchema>) => {
@@ -167,18 +227,73 @@ export default function Profile() {
       return;
     }
 
-    setIsUploading(true);
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64 = reader.result as string;
-      uploadPictureMutation.mutate(base64);
-      setIsUploading(false);
+      setImageSrc(base64);
+      setCropDialogOpen(true);
     };
     reader.onerror = () => {
       toast.error("Failed to read image", { closeButton: true });
-      setIsUploading(false);
     };
     reader.readAsDataURL(file);
+  };
+
+  const onImageLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    const { width, height } = e.currentTarget;
+    setCrop(centerAspectCrop(width, height, 1));
+  }, []);
+
+  const getCroppedImg = useCallback(async (): Promise<string> => {
+    const image = imgRef.current;
+    if (!image || !completedCrop) {
+      return imageSrc;
+    }
+
+    const canvas = document.createElement('canvas');
+    const scaleX = image.naturalWidth / image.width;
+    const scaleY = image.naturalHeight / image.height;
+    
+    const outputSize = 256;
+    canvas.width = outputSize;
+    canvas.height = outputSize;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return imageSrc;
+
+    ctx.beginPath();
+    ctx.arc(outputSize / 2, outputSize / 2, outputSize / 2, 0, Math.PI * 2);
+    ctx.closePath();
+    ctx.clip();
+
+    ctx.drawImage(
+      image,
+      completedCrop.x * scaleX,
+      completedCrop.y * scaleY,
+      completedCrop.width * scaleX,
+      completedCrop.height * scaleY,
+      0,
+      0,
+      outputSize,
+      outputSize,
+    );
+
+    return canvas.toDataURL('image/png');
+  }, [completedCrop, imageSrc]);
+
+  const handleCropComplete = async () => {
+    setIsUploading(true);
+    try {
+      const croppedImage = await getCroppedImg();
+      uploadPictureMutation.mutate(croppedImage);
+      setCropDialogOpen(false);
+      setImageSrc("");
+      setCrop(undefined);
+      setCompletedCrop(undefined);
+    } catch (error) {
+      toast.error("Failed to crop image", { closeButton: true });
+    }
+    setIsUploading(false);
   };
 
   const getInitials = (name: string) => {
@@ -286,18 +401,26 @@ export default function Profile() {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">
-                          Total Savings:
+                          Total Contributions:
                         </span>
                         <span className="font-medium text-primary">
-                          Ksh {user.totalSavings}
+                          Ksh {parseFloat(user.totalContributions || "0").toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">
-                          Total Contributions:
+                          Total Savings:
                         </span>
                         <span className="font-medium text-primary">
-                          Ksh {user.totalContributions}
+                          Ksh {parseFloat(user.totalSavings || "0").toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">
+                          Total Loans:
+                        </span>
+                        <span className="font-medium text-primary">
+                          Ksh {parseFloat(user.totalLoans || "0").toLocaleString("en-KE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
                       <Separator />
@@ -477,6 +600,7 @@ export default function Profile() {
                                     data-testid="input-new-password"
                                   />
                                 </FormControl>
+                                <PasswordStrength password={field.value} />
                                 <FormMessage />
                               </FormItem>
                             )}
@@ -586,6 +710,71 @@ export default function Profile() {
           </div>
         </div>
       </main>
+
+      {/* Image Crop Dialog */}
+      <Dialog open={cropDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setCropDialogOpen(false);
+          setImageSrc("");
+          setCrop(undefined);
+          setCompletedCrop(undefined);
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Crop Profile Picture</DialogTitle>
+            <DialogDescription>
+              Drag to adjust the circular crop area for your profile picture.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-center p-4">
+            {imageSrc && (
+              <ReactCrop
+                crop={crop}
+                onChange={(_, percentCrop) => setCrop(percentCrop)}
+                onComplete={(c) => setCompletedCrop(c)}
+                aspect={1}
+                circularCrop
+                className="max-h-[400px]"
+              >
+                <img
+                  ref={imgRef}
+                  alt="Crop preview"
+                  src={imageSrc}
+                  onLoad={onImageLoad}
+                  className="max-h-[400px] w-auto"
+                />
+              </ReactCrop>
+            )}
+          </div>
+          <DialogFooter className="flex gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCropDialogOpen(false);
+                setImageSrc("");
+                setCrop(undefined);
+                setCompletedCrop(undefined);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCropComplete}
+              disabled={isUploading || !completedCrop}
+            >
+              {isUploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Footer />
     </div>

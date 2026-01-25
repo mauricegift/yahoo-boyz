@@ -49,6 +49,9 @@ function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
         if (!user) {
           return res.status(401).json({ message: "User not found" });
         }
+        if (user.isDisabled) {
+          return res.status(403).json({ message: "Access denied. Please contact administrator." });
+        }
         req.user = user;
         next();
       })
@@ -173,54 +176,35 @@ async function sendOTPWithFallback(
   email: string,
   phone: string,
   code: string,
-  preferredMethod: "email" | "sms",
+  _preferredMethod: "email" | "sms" | "both",
   type: "signup" | "reset" | "resend",
 ): Promise<{
   success: boolean;
-  usedMethod: "email" | "sms" | "none";
+  usedMethod: "email" | "sms" | "both" | "none";
   error?: string;
 }> {
-  let success = false;
-  let usedMethod: "email" | "sms" | "none" = "none";
-  let error = "";
+  // Send to BOTH email and phone simultaneously for better delivery
+  const [emailResult, smsResult] = await Promise.allSettled([
+    sendEmailOTP(email, code, type),
+    sendSmsOTP(phone, code),
+  ]);
 
-  // Try preferred method first
-  if (preferredMethod === "sms") {
-    success = await sendSmsOTP(phone, code);
-    if (success) {
-      usedMethod = "sms";
-      return { success, usedMethod };
-    }
-    error = "SMS service failed, trying email...";
-    console.log(error);
+  const emailSuccess = emailResult.status === "fulfilled" && emailResult.value;
+  const smsSuccess = smsResult.status === "fulfilled" && smsResult.value;
 
-    // Fallback to email
-    success = await sendEmailOTP(email, code, type);
-    if (success) {
-      usedMethod = "email";
-      return { success, usedMethod };
-    }
-    error = "Both SMS and email services failed";
-  } else {
-    // Preferred method is email
-    success = await sendEmailOTP(email, code, type);
-    if (success) {
-      usedMethod = "email";
-      return { success, usedMethod };
-    }
-    error = "Email service failed, trying SMS...";
-    console.log(error);
-
-    // Fallback to SMS
-    success = await sendSmsOTP(phone, code);
-    if (success) {
-      usedMethod = "sms";
-      return { success, usedMethod };
-    }
-    error = "Both email and SMS services failed";
+  if (emailSuccess && smsSuccess) {
+    console.log("OTP sent to both email and SMS successfully");
+    return { success: true, usedMethod: "both" };
+  } else if (emailSuccess) {
+    console.log("OTP sent to email only (SMS failed)");
+    return { success: true, usedMethod: "email" };
+  } else if (smsSuccess) {
+    console.log("OTP sent to SMS only (email failed)");
+    return { success: true, usedMethod: "sms" };
   }
 
-  return { success: false, usedMethod: "none", error };
+  console.error("Both email and SMS services failed");
+  return { success: false, usedMethod: "none", error: "Both email and SMS services failed" };
 }
 
 // M-Pesa STK Push (keep as is)
@@ -238,7 +222,7 @@ async function initiateMpesaPayment(
       formattedPhone = "254" + formattedPhone;
     }
 
-    const response = await fetch(`${EMAIL_API_URL}/api/payVirusiMbayaV2.php`, {
+    const response = await fetch(`${EMAIL_API_URL}/api/pay.php`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -396,6 +380,13 @@ export async function registerRoutes(
       );
       if (!isValidPassword) {
         return res.status(401).json({ message: "Invalid email or password" });
+      }
+
+      // Check if user is disabled
+      if (user.isDisabled) {
+        return res.status(403).json({ 
+          message: "Access denied. Please contact administrator." 
+        });
       }
 
       if (!user.isVerified) {
@@ -726,23 +717,81 @@ export async function registerRoutes(
       }
     },
   );*/
-  // In your routes.ts, ensure proper number conversion:
+  // User dashboard stats with proper totals calculation
   app.get(
     "/api/dashboard/stats",
     authMiddleware,
     async (req: AuthRequest, res: Response) => {
       try {
         const userId = req.user!.id;
-        const userTotal = await storage.getUserTotalContributions(userId);
-        const userTotalSavings = await storage.getUserTotalSavings(userId);
-        const userTotalLoans = await storage.getUserTotalLoans(userId);
-        const groupTotal = await storage.getTotalContributions();
-        const groupTotalSavings = await storage.getTotalSavings();
-        const groupTotalLoans = await storage.getTotalLoansAmount();
+        const user = await storage.getUserById(userId);
+        
+        // Use user's stored totals (reflects admin edits)
+        const userTotal = parseFloat(user?.totalContributions || "0");
+        const userTotalSavings = parseFloat(user?.totalSavings || "0");
+        const userTotalLoans = parseFloat(user?.totalLoans || "0");
+        
+        // Calculate group totals from all user totals
+        const allUsers = await storage.getAllUsers();
+        let groupTotal = 0;
+        let groupTotalSavings = 0;
+        let groupTotalLoans = 0;
+        
+        for (const u of allUsers) {
+          groupTotal += parseFloat(u.totalContributions) || 0;
+          groupTotalSavings += parseFloat(u.totalSavings) || 0;
+          groupTotalLoans += parseFloat(u.totalLoans) || 0;
+        }
+        
         const loans = await storage.getLoansByUserId(userId);
         const activeLoans = loans.filter((l) => l.status === "approved").length;
         const missedContributions =
           await storage.getUnpaidMissedContributions(userId);
+
+        // Calculate contribution days tracking
+        const totalContributed = Number(userTotal) || 0;
+        const daysCovered = Math.floor(totalContributed / 20); // Each 20 Ksh covers 1 day
+        
+        // Get the first contribution date or account creation date
+        const contributions = await storage.getContributionsByUserId(userId, 1000, 0);
+        const completedContributions = contributions.filter(c => c.status === "completed");
+        
+        let daysElapsed = 0;
+        let daysAhead = 0;
+        let daysBehind = 0;
+        let nextContributionTime: Date | null = null;
+        
+        const now = new Date();
+        
+        if (completedContributions.length > 0) {
+          // Get the last successful contribution (contributions are sorted by createdAt desc)
+          const lastContribution = completedContributions[0];
+          if (lastContribution.nextContributionTime) {
+            nextContributionTime = new Date(lastContribution.nextContributionTime);
+          } else {
+            // If no nextContributionTime, calculate 24 hours from last contribution
+            nextContributionTime = new Date(lastContribution.createdAt);
+            nextContributionTime.setTime(nextContributionTime.getTime() + 24 * 60 * 60 * 1000);
+          }
+          
+          // Calculate days since first contribution
+          const firstContribution = completedContributions[completedContributions.length - 1];
+          const firstDate = new Date(firstContribution.createdAt);
+          const diffTime = now.getTime() - firstDate.getTime();
+          daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 because the first day counts
+        } else if (user) {
+          // No contributions yet - calculate days since account creation
+          const accountCreatedDate = new Date(user.createdAt);
+          const diffTime = now.getTime() - accountCreatedDate.getTime();
+          daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 because the first day counts
+        }
+        
+        // Calculate days ahead or behind
+        if (daysCovered >= daysElapsed) {
+          daysAhead = daysCovered - daysElapsed;
+        } else {
+          daysBehind = daysElapsed - daysCovered;
+        }
 
         // Ensure all values are numbers
         res.json({
@@ -755,6 +804,12 @@ export async function registerRoutes(
           activeLoans,
           pendingContributions: 0,
           missedContributions,
+          // New contribution tracking fields
+          daysCovered,
+          daysElapsed,
+          daysAhead,
+          daysBehind,
+          nextContributionTime: nextContributionTime?.toISOString() || null,
         });
       } catch (error: any) {
         console.error("Dashboard stats error:", error);
@@ -805,8 +860,18 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const userId = req.user!.id;
-        const userTotal = await storage.getUserTotalSavings(userId);
-        const groupTotal = await storage.getTotalSavings();
+        const user = await storage.getUserById(userId);
+        
+        // Use user's stored totals (authoritative - same as Dashboard)
+        const userTotal = parseFloat(user?.totalSavings || "0");
+        
+        // Calculate group total from all user totals
+        const allUsers = await storage.getAllUsers();
+        let groupTotal = 0;
+        for (const u of allUsers) {
+          groupTotal += parseFloat(u.totalSavings) || 0;
+        }
+        
         const recentSavings = await storage.getRecentSavings(userId, 5);
 
         res.json({
@@ -875,7 +940,7 @@ export async function registerRoutes(
 
         // Call M-Pesa API
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
+          `${MPESA_API_URL}/api/pay.php`,
           {
             method: "POST",
             headers: {
@@ -1132,8 +1197,18 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const userId = req.user!.id;
-        const userTotal = await storage.getUserTotalContributions(userId);
-        const groupTotal = await storage.getTotalContributions();
+        const user = await storage.getUserById(userId);
+        
+        // Use user's stored totals (authoritative - same as Dashboard)
+        const userTotal = parseFloat(user?.totalContributions || "0");
+        
+        // Calculate group total from all user totals
+        const allUsers = await storage.getAllUsers();
+        let groupTotal = 0;
+        for (const u of allUsers) {
+          groupTotal += parseFloat(u.totalContributions) || 0;
+        }
+        
         const contributions = await storage.getContributionsByUserId(userId);
 
         // Calculate this month's contributions
@@ -1154,11 +1229,42 @@ export async function registerRoutes(
         const missedContributions =
           await storage.getUnpaidMissedContributions(userId);
 
+        // Calculate days behind/ahead (same as Dashboard)
+        const totalContributed = Number(userTotal) || 0;
+        const daysCovered = Math.floor(totalContributed / 20);
+        const completedContributions = contributions.filter(c => c.status === "completed");
+        
+        let daysElapsed = 0;
+        let daysAhead = 0;
+        let daysBehind = 0;
+        
+        if (completedContributions.length > 0) {
+          const firstContribution = completedContributions[completedContributions.length - 1];
+          const firstDate = new Date(firstContribution.createdAt);
+          const diffTime = now.getTime() - firstDate.getTime();
+          daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+        } else if (user) {
+          const accountCreatedDate = new Date(user.createdAt);
+          const diffTime = now.getTime() - accountCreatedDate.getTime();
+          daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+        }
+        
+        if (daysCovered >= daysElapsed) {
+          daysAhead = daysCovered - daysElapsed;
+        } else {
+          daysBehind = daysElapsed - daysCovered;
+        }
+
         res.json({
           userTotal,
           groupTotal,
           thisMonth: thisMonthTotal,
           missedCount: missedContributions.length,
+          daysCovered,
+          daysElapsed,
+          daysAhead,
+          daysBehind,
+          missedAmount: daysBehind * 20,
         });
       } catch (error: any) {
         res
@@ -1279,7 +1385,7 @@ export async function registerRoutes(
 
         // Call M-Pesa API (using your preferred endpoint)
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
+          `${MPESA_API_URL}/api/pay.php`,
           {
             method: "POST",
             headers: {
@@ -1729,7 +1835,7 @@ export async function registerRoutes(
         });
 
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
+          `${MPESA_API_URL}/api/pay.php`,
           {
             method: "POST",
             headers: {
@@ -1839,6 +1945,186 @@ export async function registerRoutes(
     }
   }
 
+  // Pay for missed contributions (bulk payment)
+  app.post(
+    "/api/contributions/pay-missed",
+    authMiddleware,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const { amount, phone } = req.body;
+        const userId = req.user!.id;
+
+        // Get all unpaid missed contributions
+        const missedContributions = await storage.getUnpaidMissedContributions(userId);
+        
+        if (missedContributions.length === 0) {
+          return res.status(400).json({
+            success: false,
+            message: "No missed contributions to pay",
+          });
+        }
+
+        const amountNum = Number(amount);
+        if (isNaN(amountNum) || amountNum < 20) {
+          return res.status(400).json({
+            success: false,
+            message: "Amount must be at least Ksh 20",
+          });
+        }
+
+        const phoneNumber = phone || req.user!.phone;
+        if (!phoneNumber) {
+          return res.status(400).json({
+            success: false,
+            message: "Phone number is required",
+          });
+        }
+
+        // Format phone number
+        let formattedPhone = String(phoneNumber).trim();
+        formattedPhone = formattedPhone.replace(/[^\d+]/g, "");
+        formattedPhone = formattedPhone.replace(/\+/g, "");
+
+        if (formattedPhone.startsWith("0")) {
+          formattedPhone = "254" + formattedPhone.substring(1);
+        } else if (formattedPhone.startsWith("7") && formattedPhone.length === 9) {
+          formattedPhone = "254" + formattedPhone;
+        } else if (!formattedPhone.startsWith("254")) {
+          formattedPhone = "254" + formattedPhone;
+        }
+
+        const roundedAmount = Math.ceil(amountNum);
+
+        console.log("Calling M-Pesa API for missed contributions payment:", {
+          phoneNumber: formattedPhone,
+          amount: roundedAmount,
+          missedCount: missedContributions.length,
+        });
+
+        const mpesaResponse = await fetch(
+          `${MPESA_API_URL}/api/pay.php`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              phoneNumber: formattedPhone,
+              amount: roundedAmount.toString(),
+              reference: `MISSED-${userId}-${Date.now()}`,
+            }),
+          },
+        );
+
+        const resultText = await mpesaResponse.text();
+        let result;
+        try {
+          result = JSON.parse(resultText);
+        } catch (parseError) {
+          console.error("Failed to parse M-Pesa response:", parseError);
+          return res.status(502).json({
+            success: false,
+            message: "Invalid response from M-Pesa API",
+            rawResponse: resultText,
+          });
+        }
+
+        if (result.success && result.CheckoutRequestID) {
+          // Calculate how many missed days this payment covers (20 per day)
+          const daysCovered = Math.floor(roundedAmount / 20);
+          
+          // Start polling for payment status
+          setTimeout(() => {
+            checkMissedPaymentStatus(
+              result.CheckoutRequestID,
+              userId,
+              daysCovered,
+              missedContributions.slice(0, daysCovered).map((m) => m.id)
+            );
+          }, 10000);
+
+          res.json({
+            success: true,
+            checkoutRequestId: result.CheckoutRequestID,
+            message: `Payment initiated for ${daysCovered} missed day(s). Check your phone for M-Pesa prompt.`,
+            daysCovered,
+          });
+        } else {
+          res.json({
+            success: false,
+            message: result.message || "Failed to initiate M-Pesa payment",
+          });
+        }
+      } catch (error: any) {
+        res.status(400).json({
+          success: false,
+          message: error.message || "Failed to initiate missed contributions payment",
+        });
+      }
+    },
+  );
+
+  // Function to check missed contributions payment status
+  async function checkMissedPaymentStatus(
+    checkoutRequestId: string,
+    userId: number,
+    daysCovered: number,
+    missedIds: number[],
+  ) {
+    try {
+      console.log("Checking missed contributions payment status for:", checkoutRequestId);
+
+      const response = await fetch(
+        `${MPESA_API_URL}/api/verify-transaction.php`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            checkoutRequestId,
+          }),
+        },
+      );
+
+      const mpesaResult = await response.json();
+
+      if (mpesaResult.success === true && mpesaResult.status === "completed") {
+        const mpesaData = mpesaResult.data;
+
+        if (mpesaData?.ResultCode === 0 && mpesaData?.MpesaReceiptNumber) {
+          // Mark the covered missed contributions as paid
+          for (const missedId of missedIds) {
+            await storage.updateMissedContribution(missedId, {
+              isPaid: true,
+            });
+          }
+          console.log(
+            `${missedIds.length} missed contribution(s) paid successfully. Receipt: ${mpesaData.MpesaReceiptNumber}`,
+          );
+        }
+      } else if (
+        mpesaResult.success === false &&
+        mpesaResult.status === "pending"
+      ) {
+        // Payment still pending, check again in 10 seconds
+        console.log(`Missed contributions payment still pending, checking again in 10s...`);
+        setTimeout(
+          () => checkMissedPaymentStatus(checkoutRequestId, userId, daysCovered, missedIds),
+          10000,
+        );
+      } else {
+        console.log(`Missed contributions payment for user ${userId} failed.`);
+      }
+    } catch (error) {
+      console.error("Missed contributions payment status check error:", error);
+      // Try again in 10 seconds
+      setTimeout(
+        () => checkMissedPaymentStatus(checkoutRequestId, userId, daysCovered, missedIds),
+        10000,
+      );
+    }
+  }
+
   // ========== LOAN ROUTES ==========
 
   app.get(
@@ -1862,32 +2148,101 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const validatedData = loanApplicationSchema.parse(req.body);
-        const { amount, loanUsage } = validatedData;
+        const { amount, duration, loanUsage, guarantor1, guarantor2 } = validatedData;
 
-        // Check for existing pending loan
+        // Check for existing pending or active loan
         const existingLoans = await storage.getLoansByUserId(req.user!.id);
         const hasPendingLoan = existingLoans.some(
-          (l) => l.status === "pending",
+          (l) => l.status === "pending" || l.status === "approved" || l.status === "overdue",
         );
         if (hasPendingLoan) {
           return res
             .status(400)
-            .json({ message: "You already have a pending loan application" });
+            .json({ message: "You already have an active or pending loan" });
         }
 
-        // Calculate total with 10% interest
-        const totalAmount = amount * 1.1;
+        // Check user has minimum 1000 in savings
+        const userSavings = Number(req.user!.totalSavings || 0);
+        if (userSavings < 1000) {
+          return res
+            .status(400)
+            .json({ message: "You need at least Ksh 1,000 in savings to apply for a loan" });
+        }
+
+        // Check user has no unpaid missed contributions
+        const missedContributions = await storage.getMissedContributionsByUserId(req.user!.id);
+        const unpaidMissed = missedContributions.filter((m) => !m.isPaid);
+        if (unpaidMissed.length > 0) {
+          return res
+            .status(400)
+            .json({ message: "Please pay all your missed contribution penalties before applying for a loan" });
+        }
+
+        // Find guarantors by email or phone
+        const guarantor1User = await storage.getUserByEmailOrPhone(guarantor1.trim());
+        const guarantor2User = await storage.getUserByEmailOrPhone(guarantor2.trim());
+
+        if (!guarantor1User) {
+          return res
+            .status(400)
+            .json({ message: `Guarantor 1 (${guarantor1}) is not a registered member` });
+        }
+        if (!guarantor2User) {
+          return res
+            .status(400)
+            .json({ message: `Guarantor 2 (${guarantor2}) is not a registered member` });
+        }
+
+        // Check guarantors are not the same person
+        if (guarantor1User.id === guarantor2User.id) {
+          return res
+            .status(400)
+            .json({ message: "You must provide two different guarantors" });
+        }
+
+        // Check guarantors are not the applicant
+        if (guarantor1User.id === req.user!.id || guarantor2User.id === req.user!.id) {
+          return res
+            .status(400)
+            .json({ message: "You cannot be your own guarantor" });
+        }
+
+        // Check combined savings of guarantors >= loan amount
+        const guarantorsTotalSavings = Number(guarantor1User.totalSavings || 0) + Number(guarantor2User.totalSavings || 0);
+        if (guarantorsTotalSavings < amount) {
+          return res
+            .status(400)
+            .json({ 
+              message: `Guarantors' combined savings (Ksh ${guarantorsTotalSavings.toLocaleString()}) must be at least equal to the loan amount (Ksh ${amount.toLocaleString()})` 
+            });
+        }
+
+        // Calculate total with 15% interest
+        const totalAmount = amount * 1.15;
         const dueDate = new Date();
-        dueDate.setDate(dueDate.getDate() + 30); // 30 days due date
+        dueDate.setDate(dueDate.getDate() + duration);
 
         const loan = await storage.createLoan({
           userId: req.user!.id,
           amount: String(amount),
-          interestRate: "10.00",
+          duration,
+          interestRate: "15.00",
           totalAmount: String(totalAmount),
           status: "pending",
           dueDate,
           loanUsage,
+        });
+
+        // Create guarantor records
+        await storage.createLoanGuarantor({
+          loanId: loan.id,
+          guarantorId: guarantor1User.id,
+          status: "pending",
+        });
+        await storage.createLoanGuarantor({
+          loanId: loan.id,
+          guarantorId: guarantor2User.id,
+          status: "pending",
         });
 
         res.json({ message: "Loan application submitted", loan });
@@ -1954,7 +2309,7 @@ export async function registerRoutes(
 
         // Call M-Pesa API
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
+          `${MPESA_API_URL}/api/pay.php`,
           {
             method: "POST",
             headers: {
@@ -2117,7 +2472,21 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const messages = await storage.getContactMessagesByUserId(req.user!.id);
-        res.json(messages);
+        
+        // Add admin details to replied messages
+        const result = await Promise.all(messages.map(async (m) => {
+          if (m.repliedBy) {
+            const admin = await storage.getUserById(m.repliedBy);
+            return {
+              ...m,
+              repliedByName: admin?.name,
+              repliedByPhone: admin?.phone,
+            };
+          }
+          return m;
+        }));
+        
+        res.json(result);
       } catch (error: any) {
         res
           .status(400)
@@ -2158,9 +2527,18 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const users = await storage.getAllUsers();
-        const totalContributions = await storage.getTotalContributions();
-        const totalSavings = await storage.getTotalSavings();
-        const totalLoans = await storage.getTotalLoansAmount();
+        
+        // Calculate group totals from user totals (so admin edits are reflected)
+        let totalContributions = 0;
+        let totalSavings = 0;
+        let totalLoans = 0;
+        
+        for (const user of users) {
+          totalContributions += parseFloat(user.totalContributions) || 0;
+          totalSavings += parseFloat(user.totalSavings) || 0;
+          totalLoans += parseFloat(user.totalLoans) || 0;
+        }
+        
         const allLoans = await storage.getAllLoans();
         const pendingLoans = await storage.getPendingLoans();
         const overdueLoans = await storage.getOverdueLoans();
@@ -2192,10 +2570,52 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const users = await storage.getAllUsers();
-        const usersWithoutPasswords = users.map(
-          ({ password, ...user }) => user,
+        
+        // Add contribution tracking info for each user
+        const usersWithTracking = await Promise.all(
+          users.map(async ({ password, ...user }) => {
+            // Use user.totalContributions / 20 for daysCovered (consistent with Dashboard and Contributions page)
+            const totalContributed = Number(user.totalContributions) || 0;
+            const daysCovered = Math.floor(totalContributed / 20);
+            
+            // Calculate days elapsed since first contribution OR account creation
+            const contributions = await storage.getContributionsByUserId(user.id);
+            const completedContributions = contributions.filter(
+              (c) => c.status === "completed"
+            );
+            
+            let daysElapsed = 0;
+            const now = new Date();
+            
+            if (completedContributions.length > 0) {
+              // Get days since first contribution
+              const firstContribution = completedContributions[completedContributions.length - 1];
+              const firstDate = new Date(firstContribution.createdAt);
+              const diffTime = now.getTime() - firstDate.getTime();
+              daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+            } else {
+              // No contributions yet - calculate days since account creation
+              const accountCreatedDate = new Date(user.createdAt);
+              const diffTime = now.getTime() - accountCreatedDate.getTime();
+              daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+            }
+            
+            const daysBehind = Math.max(0, daysElapsed - daysCovered);
+            const daysAhead = Math.max(0, daysCovered - daysElapsed);
+            const missedAmount = daysBehind * 20;
+            
+            return {
+              ...user,
+              daysCovered,
+              daysElapsed,
+              daysBehind,
+              daysAhead,
+              missedAmount,
+            };
+          })
         );
-        res.json(usersWithoutPasswords);
+        
+        res.json(usersWithTracking);
       } catch (error: any) {
         res
           .status(400)
@@ -2218,6 +2638,8 @@ export async function registerRoutes(
           email,
           phone,
           role,
+          isVerified,
+          isDisabled,
           totalContributions,
           totalSavings,
           totalLoans,
@@ -2228,9 +2650,22 @@ export async function registerRoutes(
           return res.status(404).json({ message: "User not found" });
         }
 
-        // Superadmin can't modify other superadmins unless they are superadmin
-        if (user.role === "superadmin" && req.user!.role !== "superadmin") {
-          return res.status(403).json({ message: "Cannot modify superadmin" });
+        // Superadmins cannot be modified by anyone (except themselves for profile updates)
+        if (user.role === "superadmin") {
+          return res.status(403).json({ message: "Superadmin account cannot be modified" });
+        }
+
+        // Admins can edit basic user info and financial data
+        // Only superadmin can change roles to/from superadmin or disable users
+        if (req.user!.role !== "superadmin") {
+          // Admins cannot change role to superadmin
+          if (role !== undefined && role === "superadmin") {
+            return res.status(403).json({ message: "Only superadmin can promote users to superadmin" });
+          }
+          // Admins cannot disable other users
+          if (isDisabled !== undefined && isDisabled !== user.isDisabled) {
+            return res.status(403).json({ message: "Only superadmin can disable users" });
+          }
         }
 
         // Calculate the differences if totals are being updated
@@ -2258,8 +2693,16 @@ export async function registerRoutes(
         if (name !== undefined) updateData.name = name;
         if (email !== undefined) updateData.email = email;
         if (phone !== undefined) updateData.phone = phone;
-        if (role !== undefined && req.user!.role === "superadmin")
+        // Admins can change roles (except to superadmin), superadmin can change any role
+        if (role !== undefined && role !== "superadmin") {
           updateData.role = role;
+        } else if (role === "superadmin" && req.user!.role === "superadmin") {
+          updateData.role = role;
+        }
+        if (isVerified !== undefined) updateData.isVerified = isVerified;
+        // Only superadmin can disable users
+        if (isDisabled !== undefined && req.user!.role === "superadmin")
+          updateData.isDisabled = isDisabled;
         if (totalContributions !== undefined)
           updateData.totalContributions = String(totalContributions);
         if (totalSavings !== undefined)
@@ -2405,7 +2848,33 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const loans = await storage.getAllLoans();
-        res.json(loans);
+        const users = await storage.getAllUsers();
+        const userMap = new Map(users.map(u => [u.id, u]));
+        
+        // Get guarantors for each loan
+        const result = await Promise.all(loans.map(async (loan) => {
+          const guarantors = await storage.getLoanGuarantorsByLoanId(loan.id);
+          const guarantorDetails = guarantors.map(g => {
+            const guarantorUser = userMap.get(g.guarantorId);
+            return {
+              ...g,
+              guarantorName: guarantorUser?.name,
+              guarantorEmail: guarantorUser?.email,
+              guarantorPhone: guarantorUser?.phone,
+              guarantorSavings: guarantorUser?.totalSavings,
+            };
+          });
+          
+          return {
+            ...loan,
+            userName: userMap.get(loan.userId)?.name,
+            userEmail: userMap.get(loan.userId)?.email,
+            userPhone: userMap.get(loan.userId)?.phone,
+            guarantors: guarantorDetails,
+          };
+        }));
+        
+        res.json(result);
       } catch (error: any) {
         res
           .status(400)
@@ -2421,7 +2890,32 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const loans = await storage.getPendingLoans();
-        res.json(loans);
+        const users = await storage.getAllUsers();
+        const userMap = new Map(users.map(u => [u.id, u]));
+        
+        const result = await Promise.all(loans.map(async (loan) => {
+          const guarantors = await storage.getLoanGuarantorsByLoanId(loan.id);
+          const guarantorDetails = guarantors.map(g => {
+            const guarantorUser = userMap.get(g.guarantorId);
+            return {
+              ...g,
+              guarantorName: guarantorUser?.name,
+              guarantorEmail: guarantorUser?.email,
+              guarantorPhone: guarantorUser?.phone,
+              guarantorSavings: guarantorUser?.totalSavings,
+            };
+          });
+          
+          return {
+            ...loan,
+            userName: userMap.get(loan.userId)?.name,
+            userEmail: userMap.get(loan.userId)?.email,
+            userPhone: userMap.get(loan.userId)?.phone,
+            guarantors: guarantorDetails,
+          };
+        }));
+        
+        res.json(result);
       } catch (error: any) {
         res
           .status(400)
@@ -2541,14 +3035,96 @@ export async function registerRoutes(
     },
   );
 
+  // Get loan guarantors
+  app.get(
+    "/api/loans/:id/guarantors",
+    authMiddleware,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const loanId = parseInt(req.params.id);
+        const guarantors = await storage.getLoanGuarantorsWithUsersByLoanId(loanId);
+        res.json(guarantors);
+      } catch (error: any) {
+        res
+          .status(400)
+          .json({ message: error.message || "Failed to get guarantors" });
+      }
+    },
+  );
+
+  // Admin auto-pay: deduct from guarantors' savings for defaulted loans
+  app.post(
+    "/api/admin/loans/:id/auto-pay",
+    authMiddleware,
+    adminMiddleware,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const loanId = parseInt(req.params.id);
+        const loan = await storage.getLoanById(loanId);
+
+        if (!loan) {
+          return res.status(404).json({ message: "Loan not found" });
+        }
+
+        if (loan.status !== "overdue") {
+          return res.status(400).json({ message: "Can only auto-pay overdue loans" });
+        }
+
+        const remainingAmount = Number(loan.totalAmount) - Number(loan.amountPaid);
+        if (remainingAmount <= 0) {
+          return res.status(400).json({ message: "Loan is already fully paid" });
+        }
+
+        // Deduct from guarantors' savings
+        await storage.deductGuarantorSavings(loanId, remainingAmount);
+
+        // Update loan as paid
+        await storage.updateLoan(loanId, {
+          amountPaid: loan.totalAmount,
+          status: "paid",
+        });
+
+        res.json({ 
+          message: `Auto-pay successful. Ksh ${remainingAmount.toLocaleString()} deducted from guarantors' savings.` 
+        });
+      } catch (error: any) {
+        res
+          .status(400)
+          .json({ message: error.message || "Failed to process auto-pay" });
+      }
+    },
+  );
+
   app.get(
     "/api/admin/contributions",
     authMiddleware,
     adminMiddleware,
     async (req: AuthRequest, res: Response) => {
       try {
+        const { search } = req.query;
         const contributions = await storage.getAllContributions();
-        res.json(contributions);
+        const users = await storage.getAllUsers();
+        const userMap = new Map(users.map(u => [u.id, u]));
+        
+        let result = contributions.map(c => ({
+          ...c,
+          userName: userMap.get(c.userId)?.name,
+          userEmail: userMap.get(c.userId)?.email,
+          userPhone: userMap.get(c.userId)?.phone,
+        }));
+        
+        // Apply search filter if provided
+        if (search && typeof search === 'string') {
+          const searchLower = search.toLowerCase();
+          result = result.filter(c => 
+            c.mpesaReceiptNumber?.toLowerCase().includes(searchLower) ||
+            c.userName?.toLowerCase().includes(searchLower) ||
+            c.userEmail?.toLowerCase().includes(searchLower) ||
+            c.userPhone?.toLowerCase().includes(searchLower)
+          );
+        }
+        
+        res.json(result);
       } catch (error: any) {
         res
           .status(400)
@@ -2591,14 +3167,244 @@ export async function registerRoutes(
     },
   );
 
+  // Retry failed contribution payment (admin)
+  app.post(
+    "/api/admin/contributions/retry",
+    authMiddleware,
+    adminMiddleware,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const { contributionId, phone } = req.body;
+        
+        if (!contributionId || !phone) {
+          return res.status(400).json({ message: "Contribution ID and phone number are required", success: false });
+        }
+        
+        const contribution = await storage.getContributionById(contributionId);
+        if (!contribution) {
+          return res.status(404).json({ message: "Contribution not found", success: false });
+        }
+        
+        if (contribution.status !== "failed") {
+          return res.status(400).json({ message: "Only failed contributions can be retried", success: false });
+        }
+        
+        // Format phone number
+        let formattedPhone = String(phone).trim().replace(/[^\d+]/g, "").replace(/\+/g, "");
+        if (formattedPhone.startsWith("0")) {
+          formattedPhone = "254" + formattedPhone.substring(1);
+        } else if (formattedPhone.startsWith("7") && formattedPhone.length === 9) {
+          formattedPhone = "254" + formattedPhone;
+        } else if (!formattedPhone.startsWith("254")) {
+          formattedPhone = "254" + formattedPhone;
+        }
+        
+        const roundedAmount = Math.ceil(Number(contribution.amount));
+        
+        // Update the contribution to pending
+        await storage.updateContribution(contributionId, {
+          status: "pending",
+          errorMessage: null,
+        });
+        
+        // Call M-Pesa API
+        const mpesaResponse = await fetch(
+          `${MPESA_API_URL}/api/pay.php`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              phoneNumber: formattedPhone,
+              amount: roundedAmount.toString(),
+              reference: `CONT-${contributionId}`,
+            }),
+          },
+        );
+        
+        const resultText = await mpesaResponse.text();
+        let result;
+        try {
+          result = JSON.parse(resultText);
+        } catch (parseError) {
+          await storage.updateContribution(contributionId, {
+            status: "failed",
+            errorMessage: "Invalid response from M-Pesa API",
+          });
+          return res.status(502).json({
+            success: false,
+            message: "Invalid response from M-Pesa API",
+          });
+        }
+        
+        if (result.success && result.CheckoutRequestID) {
+          await storage.updateContribution(contributionId, {
+            mpesaCheckoutId: result.CheckoutRequestID,
+          });
+          
+          // Start polling for payment status
+          setTimeout(() => {
+            checkPaymentStatus(result.CheckoutRequestID);
+          }, 10000);
+          
+          return res.json({
+            success: true,
+            checkoutRequestId: result.CheckoutRequestID,
+            contributionId: contributionId,
+            message: "Payment retry initiated. Check your phone for M-Pesa prompt.",
+          });
+        } else {
+          await storage.updateContribution(contributionId, {
+            status: "failed",
+            errorMessage: result.message || "Failed to initiate payment",
+          });
+          return res.json({
+            success: false,
+            message: result.message || "Failed to initiate M-Pesa payment",
+          });
+        }
+      } catch (error: any) {
+        res.status(400).json({ message: error.message || "Failed to retry contribution", success: false });
+      }
+    },
+  );
+
+  // Retry failed saving payment (admin)
+  app.post(
+    "/api/admin/savings/retry",
+    authMiddleware,
+    adminMiddleware,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const { savingId, phone } = req.body;
+        
+        if (!savingId || !phone) {
+          return res.status(400).json({ message: "Saving ID and phone number are required", success: false });
+        }
+        
+        const saving = await storage.getSavingById(savingId);
+        if (!saving) {
+          return res.status(404).json({ message: "Saving not found", success: false });
+        }
+        
+        if (saving.status !== "failed") {
+          return res.status(400).json({ message: "Only failed savings can be retried", success: false });
+        }
+        
+        // Format phone number
+        let formattedPhone = String(phone).trim().replace(/[^\d+]/g, "").replace(/\+/g, "");
+        if (formattedPhone.startsWith("0")) {
+          formattedPhone = "254" + formattedPhone.substring(1);
+        } else if (formattedPhone.startsWith("7") && formattedPhone.length === 9) {
+          formattedPhone = "254" + formattedPhone;
+        } else if (!formattedPhone.startsWith("254")) {
+          formattedPhone = "254" + formattedPhone;
+        }
+        
+        const roundedAmount = Math.ceil(Number(saving.amount));
+        
+        // Update the saving to pending
+        await storage.updateSaving(savingId, {
+          status: "pending",
+          errorMessage: null,
+        });
+        
+        // Call M-Pesa API
+        const mpesaResponse = await fetch(
+          `${MPESA_API_URL}/api/pay.php`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: JSON.stringify({
+              phoneNumber: formattedPhone,
+              amount: roundedAmount.toString(),
+              reference: `SAV-${savingId}`,
+            }),
+          },
+        );
+        
+        const resultText = await mpesaResponse.text();
+        let result;
+        try {
+          result = JSON.parse(resultText);
+        } catch (parseError) {
+          await storage.updateSaving(savingId, {
+            status: "failed",
+            errorMessage: "Invalid response from M-Pesa API",
+          });
+          return res.status(502).json({
+            success: false,
+            message: "Invalid response from M-Pesa API",
+          });
+        }
+        
+        if (result.success && result.CheckoutRequestID) {
+          await storage.updateSaving(savingId, {
+            mpesaCheckoutId: result.CheckoutRequestID,
+          });
+          
+          // Start polling for payment status
+          setTimeout(() => {
+            checkSavingsPaymentStatus(result.CheckoutRequestID, savingId);
+          }, 10000);
+          
+          return res.json({
+            success: true,
+            checkoutRequestId: result.CheckoutRequestID,
+            savingId: savingId,
+            message: "Payment retry initiated. Check your phone for M-Pesa prompt.",
+          });
+        } else {
+          await storage.updateSaving(savingId, {
+            status: "failed",
+            errorMessage: result.message || "Failed to initiate payment",
+          });
+          return res.json({
+            success: false,
+            message: result.message || "Failed to initiate M-Pesa payment",
+          });
+        }
+      } catch (error: any) {
+        res.status(400).json({ message: error.message || "Failed to retry saving", success: false });
+      }
+    },
+  );
+
   app.get(
     "/api/admin/savings",
     authMiddleware,
     adminMiddleware,
     async (req: AuthRequest, res: Response) => {
       try {
+        const { search } = req.query;
         const savings = await storage.getAllSavings();
-        res.json(savings);
+        const users = await storage.getAllUsers();
+        const userMap = new Map(users.map(u => [u.id, u]));
+        
+        let result = savings.map(s => ({
+          ...s,
+          userName: userMap.get(s.userId)?.name,
+          userEmail: userMap.get(s.userId)?.email,
+          userPhone: userMap.get(s.userId)?.phone,
+        }));
+        
+        // Apply search filter if provided
+        if (search && typeof search === 'string') {
+          const searchLower = search.toLowerCase();
+          result = result.filter(s => 
+            s.mpesaReceiptNumber?.toLowerCase().includes(searchLower) ||
+            s.userName?.toLowerCase().includes(searchLower) ||
+            s.userEmail?.toLowerCase().includes(searchLower) ||
+            s.userPhone?.toLowerCase().includes(searchLower)
+          );
+        }
+        
+        res.json(result);
       } catch (error: any) {
         res
           .status(400)
@@ -2613,8 +3419,21 @@ export async function registerRoutes(
     adminMiddleware,
     async (req: AuthRequest, res: Response) => {
       try {
+        const users = await storage.getAllUsers();
+        const userMap = new Map(users.map(u => [u.id, u]));
         const messages = await storage.getAllContactMessages();
-        res.json(messages);
+        
+        // Add user and admin details to messages
+        const result = messages.map(m => ({
+          ...m,
+          userName: userMap.get(m.userId)?.name,
+          userEmail: userMap.get(m.userId)?.email,
+          userPhone: userMap.get(m.userId)?.phone,
+          repliedByName: m.repliedBy ? userMap.get(m.repliedBy)?.name : undefined,
+          repliedByPhone: m.repliedBy ? userMap.get(m.repliedBy)?.phone : undefined,
+        }));
+        
+        res.json(result);
       } catch (error: any) {
         res
           .status(400)

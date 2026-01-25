@@ -12,6 +12,7 @@ import {
   CheckCircle,
   XCircle,
 } from "lucide-react";
+import { ScrollAnimation } from "@/components/ui/scroll-animation";
 import { toast } from "react-toastify";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -97,15 +98,17 @@ export default function Contact() {
           </div>
 
           <div className="container mx-auto px-4 relative z-10">
-            <div className="max-w-3xl mx-auto text-center space-y-6">
-              <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white">
-                Contact <span className="text-primary">Us</span>
-              </h1>
-              <p className="text-lg text-white/90">
-                Have questions? We're here to help. Send us a message and our
-                team will respond as soon as possible.
-              </p>
-            </div>
+            <ScrollAnimation animation="fade-up">
+              <div className="max-w-3xl mx-auto text-center space-y-6">
+                <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white">
+                  Contact <span className="text-primary">Us</span>
+                </h1>
+                <p className="text-lg text-white/90">
+                  Have questions? We're here to help. Send us a message and our
+                  team will respond as soon as possible.
+                </p>
+              </div>
+            </ScrollAnimation>
           </div>
         </section>
 
@@ -113,10 +116,11 @@ export default function Contact() {
           <div className="container mx-auto px-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6">
               {/* Grid Item 1: Get in Touch */}
-              <div className="col-span-1">
-                <Card className="h-full">
-                  <CardContent className="pt-6 h-full">
-                    <h3 className="font-semibold text-lg mb-4">Get in Touch</h3>
+              <ScrollAnimation animation="fade-right">
+                <div className="col-span-1">
+                  <Card className="h-full">
+                    <CardContent className="pt-6 h-full">
+                      <h3 className="font-semibold text-lg mb-4">Get in Touch</h3>
                     <div className="space-y-4">
                       <div className="flex items-start gap-3">
                         <div className="p-2 rounded-lg bg-primary/10">
@@ -124,9 +128,12 @@ export default function Contact() {
                         </div>
                         <div>
                           <p className="font-medium">Phone</p>
-                          <p className="text-muted-foreground">
+                          <a 
+                            href="tel:+254748721079" 
+                            className="text-muted-foreground hover:text-primary transition-colors"
+                          >
                             +254 748 721 079
-                          </p>
+                          </a>
                         </div>
                       </div>
                       <div className="flex items-start gap-3">
@@ -135,9 +142,12 @@ export default function Contact() {
                         </div>
                         <div>
                           <p className="font-medium">Email</p>
-                          <p className="text-muted-foreground">
+                          <a 
+                            href="mailto:nightcoller33@gmail.com" 
+                            className="text-muted-foreground hover:text-primary transition-colors"
+                          >
                             nightcoller33@gmail.com
-                          </p>
+                          </a>
                         </div>
                       </div>
                       <div className="flex items-start gap-3">
@@ -164,12 +174,14 @@ export default function Contact() {
                         </div>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-              </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </ScrollAnimation>
 
               {/* Grid Item 2: Send a Message */}
-              <div className="col-span-1">
+              <ScrollAnimation animation="fade-left" delay={100}>
+                <div className="col-span-1">
                 <Card className="h-full">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -250,12 +262,14 @@ export default function Contact() {
                         </Link>
                       </div>
                     )}
-                  </CardContent>
-                </Card>
-              </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </ScrollAnimation>
 
               {/* Grid Item 3: FAQ */}
-              <div className="col-span-1">
+              <ScrollAnimation animation="fade-right" delay={200}>
+                <div className="col-span-1">
                 <Card className="h-full">
                   <CardContent className="pt-6 h-full">
                     <h3 className="font-semibold text-lg mb-4">
@@ -290,16 +304,18 @@ export default function Contact() {
                           What's the interest rate?
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          All loans have a fixed 10% interest rate.
+                          All loans have a fixed 15% interest rate.
                         </p>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-              </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </ScrollAnimation>
 
               {/* Grid Item 4: Message History */}
-              <div className="col-span-1">
+              <ScrollAnimation animation="fade-left" delay={300}>
+                <div className="col-span-1">
                 {isAuthenticated && (
                   <Card className="h-full">
                     <CardContent className="pt-6 h-full">
@@ -362,7 +378,7 @@ export default function Contact() {
                                 {msg.adminReply && (
                                   <div className="bg-primary/5 border-l-2 border-primary rounded-r-lg p-3">
                                     <p className="text-xs text-muted-foreground mb-1">
-                                      Admin Reply -{" "}
+                                      Reply from {(msg as any).repliedByName || 'Admin'} -{" "}
                                       {msg.repliedAt &&
                                         format(
                                           new Date(msg.repliedAt),
@@ -388,8 +404,9 @@ export default function Contact() {
                       )}
                     </CardContent>
                   </Card>
-                )}
-              </div>
+                  )}
+                </div>
+              </ScrollAnimation>
             </div>
           </div>
         </section>

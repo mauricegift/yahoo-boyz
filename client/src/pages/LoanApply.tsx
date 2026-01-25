@@ -10,10 +10,13 @@ import {
   Info,
   CheckCircle,
   Calendar,
+  Users,
+  Mail,
+  Phone,
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { z } from "zod";
-import { format, addMonths } from "date-fns";
+import { format, addDays } from "date-fns";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,61 +35,58 @@ import {
   FormMessage,
   FormDescription,
 } from "@/components/ui/form";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { apiRequest } from "@/lib/queryClient";
-import { loanApplicationSchema } from "@shared/schema";
+import { useAuth } from "@/lib/auth";
 
-// Define validation schema with min 100 and max 50000
 const loanApplySchema = z.object({
   amount: z
     .number()
-    .min(100, { message: "Minimum loan amount is Ksh 100" })
-    .max(50000, { message: "Maximum loan amount is Ksh 50,000" }),
-  duration: z.enum(["1", "2", "3"], {
-    required_error: "Please select a loan duration",
-  }),
+    .min(500, { message: "Minimum loan amount is Ksh 500" })
+    .max(10000, { message: "Maximum loan amount is Ksh 10,000" }),
+  duration: z
+    .number()
+    .min(1, { message: "Minimum duration is 1 day" })
+    .max(10, { message: "Maximum duration is 10 days" }),
   loanUsage: z
     .string()
     .min(10, { message: "Please provide a reason (at least 10 characters)" })
     .max(500, { message: "Reason is too long (maximum 500 characters)" }),
+  guarantor1: z
+    .string()
+    .min(1, { message: "Guarantor 1 email or phone is required" }),
+  guarantor2: z
+    .string()
+    .min(1, { message: "Guarantor 2 email or phone is required" }),
 });
 
-type LoanDuration = "1" | "2" | "3";
-
 export default function LoanApply() {
+  const { user } = useAuth();
   const [, setLocation] = useLocation();
   const [isSubmitted, setIsSubmitted] = useState(false);
 
   const form = useForm<z.infer<typeof loanApplySchema>>({
     resolver: zodResolver(loanApplySchema),
     defaultValues: {
-      amount: 1000,
-      duration: "1",
+      amount: 500,
+      duration: 7,
       loanUsage: "",
+      guarantor1: "",
+      guarantor2: "",
     },
   });
 
   const amount = form.watch("amount");
-  const duration = form.watch("duration") as LoanDuration;
-  const loanUsage = form.watch("loanUsage");
-  const interest = amount * 0.1;
+  const duration = form.watch("duration");
+  const interest = amount * 0.15;
   const totalAmount = amount + interest;
 
-  // Calculate due date based on selected duration
   const calculateDueDate = () => {
     const now = new Date();
-    const months = parseInt(duration);
-    const dueDate = addMonths(now, months);
+    const dueDate = addDays(now, duration);
     return format(dueDate, "MMMM d, yyyy");
   };
 
@@ -108,6 +108,31 @@ export default function LoanApply() {
   });
 
   const onSubmit = (data: z.infer<typeof loanApplySchema>) => {
+    // Check if guarantor is the user's own phone or email
+    const userPhone = user?.phone?.trim().toLowerCase();
+    const userEmail = user?.email?.trim().toLowerCase();
+    const g1 = data.guarantor1.trim().toLowerCase();
+    const g2 = data.guarantor2.trim().toLowerCase();
+
+    if (g1 === userPhone || g1 === userEmail) {
+      toast.error("You cannot use your own phone number or email as a guarantor", {
+        closeButton: true,
+      });
+      return;
+    }
+    if (g2 === userPhone || g2 === userEmail) {
+      toast.error("You cannot use your own phone number or email as a guarantor", {
+        closeButton: true,
+      });
+      return;
+    }
+    if (g1 === g2) {
+      toast.error("Guarantor 1 and Guarantor 2 must be different people", {
+        closeButton: true,
+      });
+      return;
+    }
+
     applyMutation.mutate(data);
   };
 
@@ -172,7 +197,6 @@ export default function LoanApply() {
           </Link>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Application Form */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -180,7 +204,7 @@ export default function LoanApply() {
                   Apply for Loan
                 </CardTitle>
                 <CardDescription>
-                  Choose your loan amount and submit for approval
+                  Choose your loan amount and provide 2 guarantors
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -199,41 +223,25 @@ export default function LoanApply() {
                             <div className="space-y-4">
                               <Input
                                 type="number"
-                                min={100}
-                                max={50000}
+                                min={500}
+                                max={10000}
                                 step={100}
                                 {...field}
                                 onChange={(e) => {
                                   const value = Number(e.target.value);
-                                  if (value < 100) {
-                                    field.onChange(100);
-                                  } else if (value > 50000) {
-                                    field.onChange(50000);
+                                  if (value < 500) {
+                                    field.onChange(500);
+                                  } else if (value > 10000) {
+                                    field.onChange(10000);
                                   } else {
                                     field.onChange(value);
-                                  }
-                                }}
-                                onBlur={(e) => {
-                                  const value = Number(e.target.value);
-                                  if (value < 100) {
-                                    field.onChange(100);
-                                    toast.warning(
-                                      "Minimum loan amount is Ksh 100",
-                                      { closeButton: true },
-                                    );
-                                  } else if (value > 50000) {
-                                    field.onChange(50000);
-                                    toast.warning(
-                                      "Maximum loan amount is Ksh 50,000",
-                                      { closeButton: true },
-                                    );
                                   }
                                 }}
                                 data-testid="input-loan-amount"
                               />
                               <Slider
-                                min={100}
-                                max={50000}
+                                min={500}
+                                max={10000}
                                 step={100}
                                 value={[field.value]}
                                 onValueChange={([value]) =>
@@ -242,13 +250,13 @@ export default function LoanApply() {
                                 className="py-4"
                               />
                               <div className="flex justify-between text-xs text-muted-foreground">
-                                <span>Ksh 100</span>
-                                <span>Ksh 50,000</span>
+                                <span>Ksh 500</span>
+                                <span>Ksh 10,000</span>
                               </div>
                             </div>
                           </FormControl>
                           <FormDescription>
-                            Enter amount between Ksh 100 and Ksh 50,000
+                            Enter amount between Ksh 500 and Ksh 10,000
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -260,24 +268,27 @@ export default function LoanApply() {
                       name="duration"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Loan Duration</FormLabel>
-                          <Select
-                            onValueChange={field.onChange}
-                            defaultValue={field.value}
-                          >
-                            <FormControl>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select duration" />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              <SelectItem value="1">1 Month</SelectItem>
-                              <SelectItem value="2">2 Months</SelectItem>
-                              <SelectItem value="3">3 Months</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          <FormLabel>Loan Duration (Days): {field.value} {field.value === 1 ? 'day' : 'days'}</FormLabel>
+                          <FormControl>
+                            <div className="space-y-4">
+                              <Slider
+                                min={1}
+                                max={10}
+                                step={1}
+                                value={[field.value]}
+                                onValueChange={([value]) =>
+                                  field.onChange(value)
+                                }
+                                className="py-4"
+                              />
+                              <div className="flex justify-between text-xs text-muted-foreground">
+                                <span>1 day</span>
+                                <span>10 days</span>
+                              </div>
+                            </div>
+                          </FormControl>
                           <FormDescription>
-                            Select how long you need to repay the loan
+                            Select repayment period (1-10 days)
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -293,7 +304,7 @@ export default function LoanApply() {
                           <FormControl>
                             <Textarea
                               placeholder="Please describe what you plan to use the loan for..."
-                              className="resize-none min-h-[100px]"
+                              className="resize-none min-h-[80px]"
                               {...field}
                               data-testid="textarea-loan-usage"
                             />
@@ -306,11 +317,66 @@ export default function LoanApply() {
                       )}
                     />
 
+                    <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Users className="h-4 w-4 text-primary" />
+                        Guarantors (Required)
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Provide 2 registered members who will guarantee your loan.
+                        Their combined savings must be at least equal to your loan amount.
+                      </p>
+
+                      <FormField
+                        control={form.control}
+                        name="guarantor1"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Guarantor 1 (Email or Phone)</FormLabel>
+                            <FormControl>
+                              <div className="relative">
+                                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                  placeholder="email@example.com or 0712345678"
+                                  className="pl-10"
+                                  {...field}
+                                  data-testid="input-guarantor1"
+                                />
+                              </div>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="guarantor2"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Guarantor 2 (Email or Phone)</FormLabel>
+                            <FormControl>
+                              <div className="relative">
+                                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                  placeholder="email@example.com or 0712345678"
+                                  className="pl-10"
+                                  {...field}
+                                  data-testid="input-guarantor2"
+                                />
+                              </div>
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
                     <div className="bg-muted/50 rounded-lg p-4 space-y-3">
                       <div className="flex items-center gap-2 text-sm">
                         <Calendar className="h-4 w-4 text-muted-foreground" />
                         <span className="text-muted-foreground">
-                          Estimated Due Date:
+                          Due Date:
                         </span>
                         <span className="font-medium">
                           {calculateDueDate()}
@@ -318,7 +384,7 @@ export default function LoanApply() {
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">
-                          Selected Amount
+                          Loan Amount
                         </span>
                         <span className="font-mono font-semibold">
                           Ksh {amount.toLocaleString()}
@@ -326,7 +392,7 @@ export default function LoanApply() {
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-muted-foreground">
-                          Interest (10%)
+                          Interest (15%)
                         </span>
                         <span className="font-mono font-semibold text-chart-2">
                           Ksh {interest.toLocaleString()}
@@ -355,7 +421,6 @@ export default function LoanApply() {
               </CardContent>
             </Card>
 
-            {/* Loan Calculator */}
             <div className="space-y-6">
               <Card>
                 <CardHeader>
@@ -390,16 +455,12 @@ export default function LoanApply() {
                       Repayment Period
                     </span>
                     <span className="font-semibold">
-                      {duration === "1"
-                        ? "1 Month"
-                        : duration === "2"
-                          ? "2 Months"
-                          : "3 Months"}
+                      {duration} {duration === 1 ? "day" : "days"}
                     </span>
                   </div>
                   <div className="flex justify-between py-2 border-b">
                     <span className="text-muted-foreground">
-                      Estimated Due Date
+                      Due Date
                     </span>
                     <span className="font-semibold">{calculateDueDate()}</span>
                   </div>
@@ -416,7 +477,7 @@ export default function LoanApply() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Info className="h-4 w-4 text-primary" />
-                    Loan Terms & Limits
+                    Loan Requirements
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -424,50 +485,47 @@ export default function LoanApply() {
                     <li className="flex items-start gap-2">
                       <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
                       <span>
-                        <strong>Minimum loan:</strong> Ksh 100
+                        <strong>Minimum savings:</strong> Ksh 1,000 required
                       </span>
                     </li>
                     <li className="flex items-start gap-2">
                       <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
                       <span>
-                        <strong>Maximum loan:</strong> Ksh 50,000
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
-                      <span>Fixed 10% interest rate on all loans</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
-                      <span>
-                        Loan duration options: 1, 2, or 3 months repayment
-                      </span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
-                      <span>Loan approval subject to admin review</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
-                      <span>Repayment via M-Pesa</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
-                      <span>
-                        Provide clear reason for loan to improve approval
-                        chances
+                        <strong>No missed contributions</strong> allowed
                       </span>
                     </li>
                     <li className="flex items-start gap-2">
                       <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
                       <span>
-                        Active contributions may improve approval chances
+                        <strong>2 guarantors required</strong> - registered members
                       </span>
                     </li>
                     <li className="flex items-start gap-2">
                       <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
                       <span>
-                        Late payments incur additional penalties (5% per day)
+                        Guarantors' combined savings must equal loan amount
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
+                      <span>
+                        <strong>Loan amount:</strong> Ksh 500 - Ksh 10,000
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
+                      <span>
+                        <strong>Duration:</strong> 1 - 10 days
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2" />
+                      <span>Fixed 15% interest rate</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <div className="h-1.5 w-1.5 rounded-full bg-destructive mt-2" />
+                      <span className="text-destructive">
+                        <strong>Default:</strong> Guarantors' savings will be deducted
                       </span>
                     </li>
                   </ul>
@@ -479,17 +537,12 @@ export default function LoanApply() {
                   <div className="text-center">
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/20 text-primary text-sm font-medium mb-3">
                       <Info className="h-3 w-3" />
-                      Quick Tips
+                      Important Notice
                     </div>
                     <p className="text-sm">
-                      <strong>Tip:</strong> Start with a smaller amount for
-                      faster approval. You can apply for larger loans once you
-                      build a good repayment history.
-                    </p>
-                    <p className="text-sm mt-2">
-                      <strong>Important:</strong> Be specific about your loan
-                      purpose. Clear, legitimate reasons are more likely to be
-                      approved.
+                      If you fail to repay your loan, the admin may use the
+                      <strong> auto-pay </strong> feature to deduct the remaining
+                      amount from your guarantors' savings equally.
                     </p>
                   </div>
                 </CardContent>

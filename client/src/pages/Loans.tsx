@@ -13,6 +13,8 @@ import {
   TrendingUp,
   ArrowRight,
   RefreshCw,
+  Users,
+  Mail,
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { format } from "date-fns";
@@ -46,6 +48,64 @@ import { Footer } from "@/components/layout/Footer";
 import { useAuth } from "@/lib/auth";
 import { apiRequest } from "@/lib/queryClient";
 import type { Loan, LoanRepayment } from "@shared/schema";
+
+interface Guarantor {
+  id: number;
+  guarantorName: string;
+  guarantorEmail: string;
+  guarantorPhone: string;
+  guarantorSavings: string;
+  status: string;
+}
+
+function GuarantorsList({ loanId }: { loanId: number }) {
+  const { data: guarantors, isLoading } = useQuery<Guarantor[]>({
+    queryKey: [`/api/loans/${loanId}/guarantors`],
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    );
+  }
+
+  if (!guarantors || guarantors.length === 0) {
+    return <p className="text-sm text-muted-foreground">No guarantors found</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {guarantors.map((g, index) => (
+        <div
+          key={g.id}
+          className="flex items-start gap-3 p-2 bg-muted/30 rounded-lg text-sm"
+        >
+          <div className="p-1.5 rounded-lg bg-primary/10">
+            <Users className="h-3.5 w-3.5 text-primary" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-medium truncate">
+              Guarantor {index + 1}: {g.guarantorName}
+            </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Mail className="h-3 w-3" />
+                {g.guarantorEmail}
+              </span>
+              <span className="flex items-center gap-1">
+                <Phone className="h-3 w-3" />
+                {g.guarantorPhone}
+              </span>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function Loans() {
   const { user } = useAuth();
@@ -305,6 +365,20 @@ export default function Loans() {
                         )}
                       </div>
 
+                      <Accordion type="single" collapsible>
+                        <AccordionItem value="guarantors" className="border-none">
+                          <AccordionTrigger className="text-sm py-2">
+                            <span className="flex items-center gap-2">
+                              <Users className="h-4 w-4" />
+                              View Guarantors
+                            </span>
+                          </AccordionTrigger>
+                          <AccordionContent>
+                            <GuarantorsList loanId={loan.id} />
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+
                       <Button
                         className="w-full"
                         onClick={() => handleRepay(loan)}
@@ -367,6 +441,19 @@ export default function Loans() {
                           {getStatusBadge(loan.status)}
                         </div>
                       </div>
+                      <Accordion type="single" collapsible className="mt-4">
+                        <AccordionItem value="guarantors" className="border-none">
+                          <AccordionTrigger className="text-sm py-2">
+                            <span className="flex items-center gap-2">
+                              <Users className="h-4 w-4" />
+                              View Guarantors
+                            </span>
+                          </AccordionTrigger>
+                          <AccordionContent>
+                            <GuarantorsList loanId={loan.id} />
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
                     </CardContent>
                   </Card>
                 ))}
@@ -483,7 +570,7 @@ export default function Loans() {
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">
-                            Interest (10%)
+                            Interest (15%)
                           </p>
                           <p className="font-mono font-semibold">
                             Ksh{" "}

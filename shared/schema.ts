@@ -21,8 +21,9 @@ export const users = pgTable("users", {
   phone: text("phone").notNull(),
   role: text("role").notNull().default("user"), // user, admin, superadmin
   profilePicture: text("profile_picture"),
-  otpPreference: text("otp_preference").notNull().default("sms"), // email or sms, default to sms
+  otpPreference: text("otp_preference").notNull().default("both"), // email, sms, or both - sends to all channels
   isVerified: boolean("is_verified").notNull().default(false),
+  isDisabled: boolean("is_disabled").notNull().default(false),
   totalContributions: decimal("total_contributions", {
     precision: 15,
     scale: 2,
@@ -102,6 +103,7 @@ export const loans = pgTable("loans", {
     .notNull()
     .references(() => users.id),
   amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  duration: integer("duration").notNull().default(7), // loan duration in days (1-10)
   interestRate: decimal("interest_rate", { precision: 5, scale: 2 })
     .notNull()
     .default("10.00"),
@@ -138,6 +140,19 @@ export const loanRepayments = pgTable("loan_repayments", {
   mpesaReceiptNumber: text("mpesa_receipt_number"),
   mpesaCheckoutId: text("mpesa_checkout_id"),
   status: text("status").notNull().default("pending"), // pending, completed, failed
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// Loan guarantors table
+export const loanGuarantors = pgTable("loan_guarantors", {
+  id: serial("id").primaryKey(),
+  loanId: integer("loan_id")
+    .notNull()
+    .references(() => loans.id),
+  guarantorId: integer("guarantor_id")
+    .notNull()
+    .references(() => users.id),
+  status: text("status").notNull().default("pending"), // pending, accepted, rejected
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -190,6 +205,18 @@ export const loansRelations = relations(loans, ({ one, many }) => ({
     references: [users.id],
   }),
   repayments: many(loanRepayments),
+  guarantors: many(loanGuarantors),
+}));
+
+export const loanGuarantorsRelations = relations(loanGuarantors, ({ one }) => ({
+  loan: one(loans, {
+    fields: [loanGuarantors.loanId],
+    references: [loans.id],
+  }),
+  guarantor: one(users, {
+    fields: [loanGuarantors.guarantorId],
+    references: [users.id],
+  }),
 }));
 
 export const loanRepaymentsRelations = relations(loanRepayments, ({ one }) => ({
@@ -293,7 +320,7 @@ export const signupSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
   name: z.string().min(2, "Name must be at least 2 characters"),
   phone: z.string().min(10, "Please enter a valid phone number"),
-  otpPreference: z.enum(["email", "sms"]).default("sms"),
+  otpPreference: z.enum(["email", "sms", "both"]).default("both"),
 });
 
 export const loginSchema = z.object({
@@ -315,9 +342,20 @@ export const resetPasswordSchema = z.object({
 export const loanApplicationSchema = z.object({
   amount: z
     .number()
-    .min(100, "Minimum loan amount is Ksh 100")
-    .max(100000, "Maximum loan amount is Ksh 100,000"),
+    .min(500, "Minimum loan amount is Ksh 500")
+    .max(10000, "Maximum loan amount is Ksh 10,000"),
+  duration: z
+    .number()
+    .min(1, "Minimum loan duration is 1 day")
+    .max(10, "Maximum loan duration is 10 days"),
   loanUsage: z.string().min(5, "Please specify the loan usage reason"),
+  guarantor1: z.string().min(1, "Guarantor 1 email or phone is required"),
+  guarantor2: z.string().min(1, "Guarantor 2 email or phone is required"),
+});
+
+export const insertLoanGuarantorSchema = createInsertSchema(loanGuarantors).omit({
+  id: true,
+  createdAt: true,
 });
 
 export const savingsSchema = z.object({
@@ -347,5 +385,7 @@ export type Loan = typeof loans.$inferSelect;
 export type InsertLoan = z.infer<typeof insertLoanSchema>;
 export type LoanRepayment = typeof loanRepayments.$inferSelect;
 export type InsertLoanRepayment = z.infer<typeof insertLoanRepaymentSchema>;
+export type LoanGuarantor = typeof loanGuarantors.$inferSelect;
+export type InsertLoanGuarantor = z.infer<typeof insertLoanGuarantorSchema>;
 export type ContactMessage = typeof contactMessages.$inferSelect;
 export type InsertContactMessage = z.infer<typeof insertContactMessageSchema>;

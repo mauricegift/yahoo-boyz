@@ -9,6 +9,11 @@ import {
   LogOut,
   LayoutDashboard,
   Settings,
+  Wallet,
+  PiggyBank,
+  Banknote,
+  Info,
+  MessageCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -26,6 +31,15 @@ const publicLinks = [
   { href: "/", label: "Home" },
   { href: "/about", label: "About Us" },
   { href: "/contact", label: "Contact" },
+];
+
+const authenticatedLinks = [
+  { href: "/dashboard", label: "Dashboard", icon: "LayoutDashboard" },
+  { href: "/contributions", label: "Contributions", icon: "Wallet" },
+  { href: "/savings", label: "Savings", icon: "PiggyBank" },
+  { href: "/loans", label: "Loans", icon: "Banknote" },
+  { href: "/about", label: "About Us", icon: "Info" },
+  { href: "/contact", label: "Contact", icon: "MessageCircle" },
 ];
 
 export function Header() {
@@ -59,17 +73,55 @@ export function Header() {
           </Link>
 
           <nav className="hidden md:flex items-center gap-1">
-            {publicLinks.map((link) => (
-              <Link key={link.href} href={link.href}>
-                <Button
-                  variant={location === link.href ? "secondary" : "ghost"}
-                  size="sm"
-                  data-testid={`nav-link-${link.label.toLowerCase().replace(/\s/g, "-")}`}
-                >
-                  {link.label}
-                </Button>
-              </Link>
-            ))}
+            {isAuthenticated ? (
+              <>
+                {authenticatedLinks.map((link) => (
+                  <Link key={link.href} href={link.href}>
+                    <Button
+                      variant={location === link.href ? "secondary" : "ghost"}
+                      size="sm"
+                      className="gap-1.5"
+                      data-testid={`nav-link-${link.label.toLowerCase().replace(/\s/g, "-")}`}
+                    >
+                      {link.icon === "LayoutDashboard" && <LayoutDashboard className="h-4 w-4" />}
+                      {link.icon === "Wallet" && <Wallet className="h-4 w-4" />}
+                      {link.icon === "PiggyBank" && <PiggyBank className="h-4 w-4" />}
+                      {link.icon === "Banknote" && <Banknote className="h-4 w-4" />}
+                      {link.icon === "Info" && <Info className="h-4 w-4" />}
+                      {link.icon === "MessageCircle" && <MessageCircle className="h-4 w-4" />}
+                      {link.label}
+                    </Button>
+                  </Link>
+                ))}
+                {isAdmin && (
+                  <Link href="/admin">
+                    <Button
+                      variant={location === "/admin" ? "secondary" : "ghost"}
+                      size="sm"
+                      className="gap-1.5"
+                      data-testid="nav-link-admin"
+                    >
+                      <Settings className="h-4 w-4" />
+                      Admin
+                    </Button>
+                  </Link>
+                )}
+              </>
+            ) : (
+              <>
+                {publicLinks.map((link) => (
+                  <Link key={link.href} href={link.href}>
+                    <Button
+                      variant={location === link.href ? "secondary" : "ghost"}
+                      size="sm"
+                      data-testid={`nav-link-${link.label.toLowerCase().replace(/\s/g, "-")}`}
+                    >
+                      {link.label}
+                    </Button>
+                  </Link>
+                ))}
+              </>
+            )}
           </nav>
 
           <div className="flex items-center gap-2">
@@ -124,26 +176,6 @@ export function Header() {
                     </div>
                   </div>
                   <DropdownMenuSeparator />
-                  <Link href="/dashboard">
-                    <DropdownMenuItem
-                      className="cursor-pointer"
-                      data-testid="menu-dashboard"
-                    >
-                      <LayoutDashboard className="mr-2 h-4 w-4" />
-                      Dashboard
-                    </DropdownMenuItem>
-                  </Link>
-                  {isAdmin && (
-                    <Link href="/admin">
-                      <DropdownMenuItem
-                        className="cursor-pointer"
-                        data-testid="menu-admin"
-                      >
-                        <Settings className="mr-2 h-4 w-4" />
-                        Admin Panel
-                      </DropdownMenuItem>
-                    </Link>
-                  )}
                   <Link href="/profile">
                     <DropdownMenuItem
                       className="cursor-pointer"
@@ -197,23 +229,86 @@ export function Header() {
 
         {mobileMenuOpen && (
           <div className="md:hidden border-t py-4 space-y-2">
-            {publicLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <Button
-                  variant={location === link.href ? "secondary" : "ghost"}
-                  className="w-full justify-start"
-                  data-testid={`mobile-nav-${link.label.toLowerCase().replace(/\s/g, "-")}`}
-                >
-                  {link.label}
-                </Button>
-              </Link>
-            ))}
-            {!isAuthenticated && (
+            {isAuthenticated && user ? (
               <>
+                <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)}>
+                  <Button variant={location === "/dashboard" ? "secondary" : "ghost"} className="w-full justify-start gap-2">
+                    <LayoutDashboard className="h-4 w-4" />
+                    Dashboard
+                  </Button>
+                </Link>
+                <Link href="/contributions" onClick={() => setMobileMenuOpen(false)}>
+                  <Button variant={location === "/contributions" ? "secondary" : "ghost"} className="w-full justify-start gap-2">
+                    <Wallet className="h-4 w-4" />
+                    My Contributions
+                  </Button>
+                </Link>
+                <Link href="/savings" onClick={() => setMobileMenuOpen(false)}>
+                  <Button variant={location === "/savings" ? "secondary" : "ghost"} className="w-full justify-start gap-2">
+                    <PiggyBank className="h-4 w-4" />
+                    My Savings
+                  </Button>
+                </Link>
+                <Link href="/loans" onClick={() => setMobileMenuOpen(false)}>
+                  <Button variant={location === "/loans" ? "secondary" : "ghost"} className="w-full justify-start gap-2">
+                    <Banknote className="h-4 w-4" />
+                    My Loans
+                  </Button>
+                </Link>
+                <Link href="/about" onClick={() => setMobileMenuOpen(false)}>
+                  <Button variant={location === "/about" ? "secondary" : "ghost"} className="w-full justify-start gap-2">
+                    <Info className="h-4 w-4" />
+                    About Us
+                  </Button>
+                </Link>
+                <Link href="/contact" onClick={() => setMobileMenuOpen(false)}>
+                  <Button variant={location === "/contact" ? "secondary" : "ghost"} className="w-full justify-start gap-2">
+                    <MessageCircle className="h-4 w-4" />
+                    Contact
+                  </Button>
+                </Link>
+                {isAdmin && (
+                  <Link href="/admin" onClick={() => setMobileMenuOpen(false)}>
+                    <Button variant={location === "/admin" ? "secondary" : "ghost"} className="w-full justify-start gap-2">
+                      <Settings className="h-4 w-4" />
+                      Admin Panel
+                    </Button>
+                  </Link>
+                )}
+                <div className="pt-2 border-t space-y-2">
+                  <Link href="/profile" onClick={() => setMobileMenuOpen(false)}>
+                    <Button variant={location === "/profile" ? "secondary" : "ghost"} className="w-full justify-start gap-2">
+                      <User className="h-4 w-4" />
+                      Profile
+                    </Button>
+                  </Link>
+                  <Button 
+                    variant="ghost" 
+                    className="w-full justify-start gap-2 text-destructive hover:text-destructive"
+                    onClick={() => { logout(); setMobileMenuOpen(false); }}
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Logout
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                {publicLinks.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    <Button
+                      variant={location === link.href ? "secondary" : "ghost"}
+                      className="w-full justify-start"
+                      data-testid={`mobile-nav-${link.label.toLowerCase().replace(/\s/g, "-")}`}
+                    >
+                      {link.label}
+                    </Button>
+                  </Link>
+                ))}
                 <div className="pt-2 border-t space-y-2">
                   <Link href="/login" onClick={() => setMobileMenuOpen(false)}>
                     <Button

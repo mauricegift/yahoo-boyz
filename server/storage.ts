@@ -5,6 +5,7 @@ import {
   missedContributions,
   loans,
   loanRepayments,
+  loanGuarantors,
   contactMessages,
   savings,
   type User,
@@ -19,13 +20,15 @@ import {
   type InsertLoan,
   type LoanRepayment,
   type InsertLoanRepayment,
+  type LoanGuarantor,
+  type InsertLoanGuarantor,
   type ContactMessage,
   type InsertContactMessage,
   type Saving,
   type InsertSaving,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, sql, gte, lte, asc } from "drizzle-orm";
+import { eq, and, desc, sql, gte, lte, asc, or } from "drizzle-orm";
 
 export interface IStorage {
   // Users
@@ -53,6 +56,7 @@ export interface IStorage {
     limit?: number,
     offset?: number,
   ): Promise<Contribution[]>;
+  getContributionById(id: number): Promise<Contribution | undefined>;
   getAllContributions(): Promise<Contribution[]>;
   updateContribution(
     id: number,
@@ -120,6 +124,16 @@ export interface IStorage {
     checkoutId: string,
   ): Promise<LoanRepayment | undefined>;
   getTotalLoanRepaymentsAmount(loanId: number): Promise<number>;
+
+  // Loan Guarantors
+  createLoanGuarantor(guarantor: InsertLoanGuarantor): Promise<LoanGuarantor>;
+  getLoanGuarantorsByLoanId(loanId: number): Promise<LoanGuarantor[]>;
+  getLoanGuarantorsWithUsersByLoanId(loanId: number): Promise<any[]>;
+  updateLoanGuarantor(id: number, data: Partial<LoanGuarantor>): Promise<LoanGuarantor>;
+  deductGuarantorSavings(loanId: number, amount: number): Promise<void>;
+
+  // User lookup
+  getUserByEmailOrPhone(emailOrPhone: string): Promise<User | undefined>;
 
   // Admin Dashboard
   getRecentContributionsWithUsers(limit: number): Promise<any[]>;
@@ -237,6 +251,14 @@ export class DatabaseStorage implements IStorage {
     }
 
     return await query;
+  }
+
+  async getContributionById(id: number): Promise<Contribution | undefined> {
+    const [contribution] = await db
+      .select()
+      .from(contributions)
+      .where(eq(contributions.id, id));
+    return contribution;
   }
 
   async getAllContributions(): Promise<Contribution[]> {
@@ -624,8 +646,10 @@ export class DatabaseStorage implements IStorage {
     return await db
       .select({
         id: contributions.id,
+        userId: contributions.userId,
         amount: contributions.amount,
         status: contributions.status,
+        mpesaReceiptNumber: contributions.mpesaReceiptNumber,
         createdAt: contributions.createdAt,
         userName: users.name,
         userEmail: users.email,
@@ -641,9 +665,11 @@ export class DatabaseStorage implements IStorage {
     return await db
       .select({
         id: savings.id,
+        userId: savings.userId,
         amount: savings.amount,
         description: savings.description,
         status: savings.status,
+        mpesaReceiptNumber: savings.mpesaReceiptNumber,
         createdAt: savings.createdAt,
         userName: users.name,
         userEmail: users.email,
@@ -696,6 +722,76 @@ export class DatabaseStorage implements IStorage {
       .from(contactMessages)
       .where(eq(contactMessages.id, id));
     return m || undefined;
+  }
+
+  // Loan Guarantors
+  async createLoanGuarantor(guarantor: InsertLoanGuarantor): Promise<LoanGuarantor> {
+    const [g] = await db.insert(loanGuarantors).values(guarantor).returning();
+    return g;
+  }
+
+  async getLoanGuarantorsByLoanId(loanId: number): Promise<LoanGuarantor[]> {
+    return await db
+      .select()
+      .from(loanGuarantors)
+      .where(eq(loanGuarantors.loanId, loanId));
+  }
+
+  async getLoanGuarantorsWithUsersByLoanId(loanId: number): Promise<any[]> {
+    return await db
+      .select({
+        id: loanGuarantors.id,
+        loanId: loanGuarantors.loanId,
+        guarantorId: loanGuarantors.guarantorId,
+        status: loanGuarantors.status,
+        createdAt: loanGuarantors.createdAt,
+        guarantorName: users.name,
+        guarantorEmail: users.email,
+        guarantorPhone: users.phone,
+        guarantorSavings: users.totalSavings,
+      })
+      .from(loanGuarantors)
+      .innerJoin(users, eq(loanGuarantors.guarantorId, users.id))
+      .where(eq(loanGuarantors.loanId, loanId));
+  }
+
+  async updateLoanGuarantor(id: number, data: Partial<LoanGuarantor>): Promise<LoanGuarantor> {
+    const [g] = await db
+      .update(loanGuarantors)
+      .set(data)
+      .where(eq(loanGuarantors.id, id))
+      .returning();
+    return g;
+  }
+
+  async deductGuarantorSavings(loanId: number, amount: number): Promise<void> {
+    const guarantors = await this.getLoanGuarantorsWithUsersByLoanId(loanId);
+    if (guarantors.length < 2) {
+      throw new Error("Loan does not have enough guarantors");
+    }
+
+    const amountPerGuarantor = amount / guarantors.length;
+
+    for (const guarantor of guarantors) {
+      const currentSavings = Number(guarantor.guarantorSavings || 0);
+      const deductAmount = Math.min(amountPerGuarantor, currentSavings);
+      
+      if (deductAmount > 0) {
+        await db
+          .update(users)
+          .set({ totalSavings: String(currentSavings - deductAmount) })
+          .where(eq(users.id, guarantor.guarantorId));
+      }
+    }
+  }
+
+  // User lookup by email or phone
+  async getUserByEmailOrPhone(emailOrPhone: string): Promise<User | undefined> {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(or(eq(users.email, emailOrPhone), eq(users.phone, emailOrPhone)));
+    return user || undefined;
   }
 }
 

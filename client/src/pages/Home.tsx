@@ -23,6 +23,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { useAuth } from "@/lib/auth";
+import { ScrollAnimation } from "@/components/ui/scroll-animation";
 
 // Media items for the carousel
 const mediaItems = [
@@ -58,7 +59,7 @@ const features = [
     icon: Banknote,
     title: "Accessible Loans",
     description:
-      "Apply for loans at 10% interest rate. Quick approval process for eligible members.",
+      "Apply for loans at 15% interest rate. Quick approval process for eligible members.",
   },
   {
     icon: Shield,
@@ -82,7 +83,7 @@ const steps = [
   {
     step: 3,
     title: "Apply for Loans",
-    description: "Access loans at 10% interest when eligible",
+    description: "Access loans at 15% interest when eligible",
   },
   {
     step: 4,
@@ -92,9 +93,9 @@ const steps = [
 ];
 
 const stats = [
-  { value: "1000+", label: "Active Members" },
-  { value: "Ksh 5M+", label: "Total Contributions" },
-  { value: "Ksh 2M+", label: "Loans Disbursed" },
+  { value: "35+", label: "Active Members" },
+  { value: "Ksh 15K+", label: "Total Contributions" },
+  { value: "Ksh 12K+", label: "Loans Disbursed" },
   { value: "98%", label: "Satisfaction Rate" },
 ];
 
@@ -467,36 +468,37 @@ export default function Home() {
         {/* Features Section */}
         <section className="py-12 md:py-16 lg:py-20 bg-gradient-to-b from-background to-card/50">
           <div className="container mx-auto px-4">
-            <div className="text-center mb-8 md:mb-12">
-              <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4">
-                Why Choose YAHOO-BOYZ?
-              </h2>
-              <p className="text-muted-foreground max-w-2xl mx-auto text-sm md:text-base">
-                We provide a transparent and secure platform for group savings
-                and loans.
-              </p>
-            </div>
+            <ScrollAnimation animation="fade-up">
+              <div className="text-center mb-8 md:mb-12">
+                <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4">
+                  Why Choose YAHOO-BOYZ?
+                </h2>
+                <p className="text-muted-foreground max-w-2xl mx-auto text-sm md:text-base">
+                  We provide a transparent and secure platform for group savings
+                  and loans.
+                </p>
+              </div>
+            </ScrollAnimation>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
               {features.map((feature, index) => (
-                <Card
-                  key={index}
-                  className="border-0 shadow-none bg-background"
-                >
-                  <CardContent className="pt-6">
-                    <div className="flex flex-col items-center text-center space-y-4">
-                      <div className="p-3 rounded-xl bg-primary/10">
-                        <feature.icon className="h-8 w-8 md:h-10 md:w-10 text-primary" />
+                <ScrollAnimation key={index} animation="zoom-in" delay={index * 100}>
+                  <Card className="border-0 shadow-none bg-background h-full">
+                    <CardContent className="pt-6">
+                      <div className="flex flex-col items-center text-center space-y-4">
+                        <div className="p-3 rounded-xl bg-primary/10">
+                          <feature.icon className="h-8 w-8 md:h-10 md:w-10 text-primary" />
+                        </div>
+                        <h3 className="text-xl md:text-2xl font-semibold">
+                          {feature.title}
+                        </h3>
+                        <p className="text-muted-foreground text-sm md:text-base">
+                          {feature.description}
+                        </p>
                       </div>
-                      <h3 className="text-xl md:text-2xl font-semibold">
-                        {feature.title}
-                      </h3>
-                      <p className="text-muted-foreground text-sm md:text-base">
-                        {feature.description}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                </ScrollAnimation>
               ))}
             </div>
           </div>
@@ -505,33 +507,37 @@ export default function Home() {
         {/* How It Works Section */}
         <section className="py-12 md:py-16 lg:py-20">
           <div className="container mx-auto px-4">
-            <div className="text-center mb-8 md:mb-12">
-              <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4">
-                How It Works
-              </h2>
-              <p className="text-muted-foreground max-w-2xl mx-auto text-sm md:text-base">
-                Getting started is simple. Follow these four easy steps.
-              </p>
-            </div>
+            <ScrollAnimation animation="fade-up">
+              <div className="text-center mb-8 md:mb-12">
+                <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4">
+                  How It Works
+                </h2>
+                <p className="text-muted-foreground max-w-2xl mx-auto text-sm md:text-base">
+                  Getting started is simple. Follow these four easy steps.
+                </p>
+              </div>
+            </ScrollAnimation>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 md:gap-8">
               {steps.map((item) => (
-                <div key={item.step} className="relative">
-                  <div className="flex flex-col items-center text-center space-y-4 p-4">
-                    <div className="flex items-center justify-center w-12 h-12 md:w-16 md:h-16 rounded-full bg-primary text-primary-foreground font-bold text-lg md:text-xl">
-                      {item.step}
+                <ScrollAnimation key={item.step} animation="fade-up" delay={(item.step - 1) * 100}>
+                  <div className="relative">
+                    <div className="flex flex-col items-center text-center space-y-4 p-4">
+                      <div className="flex items-center justify-center w-12 h-12 md:w-16 md:h-16 rounded-full bg-primary text-primary-foreground font-bold text-lg md:text-xl">
+                        {item.step}
+                      </div>
+                      <h3 className="font-semibold text-lg md:text-xl">
+                        {item.title}
+                      </h3>
+                      <p className="text-sm md:text-base text-muted-foreground">
+                        {item.description}
+                      </p>
                     </div>
-                    <h3 className="font-semibold text-lg md:text-xl">
-                      {item.title}
-                    </h3>
-                    <p className="text-sm md:text-base text-muted-foreground">
-                      {item.description}
-                    </p>
+                    {item.step < 4 && (
+                      <div className="hidden lg:block absolute top-6 left-[60%] w-[80%] h-0.5 bg-border" />
+                    )}
                   </div>
-                  {item.step < 4 && (
-                    <div className="hidden lg:block absolute top-6 left-[60%] w-[80%] h-0.5 bg-border" />
-                  )}
-                </div>
+                </ScrollAnimation>
               ))}
             </div>
           </div>
@@ -542,14 +548,16 @@ export default function Home() {
           <div className="container mx-auto px-4">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
               {stats.map((stat, index) => (
-                <div key={index} className="text-center">
-                  <div className="text-2xl md:text-3xl lg:text-4xl font-bold mb-2">
-                    {stat.value}
+                <ScrollAnimation key={index} animation="zoom-in" delay={index * 100}>
+                  <div className="text-center">
+                    <div className="text-2xl md:text-3xl lg:text-4xl font-bold mb-2">
+                      {stat.value}
+                    </div>
+                    <div className="text-primary-foreground/80 text-sm md:text-base">
+                      {stat.label}
+                    </div>
                   </div>
-                  <div className="text-primary-foreground/80 text-sm md:text-base">
-                    {stat.label}
-                  </div>
-                </div>
+                </ScrollAnimation>
               ))}
             </div>
           </div>
@@ -558,30 +566,32 @@ export default function Home() {
         {/* CTA Section */}
         <section className="py-12 md:py-16 lg:py-20">
           <div className="container mx-auto px-4">
-            <Card className="border-0 bg-gradient-to-r from-primary/10 to-accent/20">
-              <CardContent className="py-10 md:py-12 text-center">
-                <div className="flex justify-center mb-6">
-                  <Users className="h-12 w-12 md:h-16 md:w-16 text-primary" />
-                </div>
-                <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4">
-                  Ready to Start Your Journey?
-                </h2>
-                <p className="text-muted-foreground max-w-xl mx-auto mb-6 md:mb-8 text-sm md:text-base">
-                  Join thousands of Kenyans who are building their financial
-                  future together. Start with just Ksh 20 today.
-                </p>
-                <Link href="/signup">
-                  <Button
-                    size="lg"
-                    className="gap-2 px-6 py-4 md:px-8 md:py-6 text-base md:text-lg"
-                    data-testid="cta-join-button"
-                  >
-                    Create Free Account{" "}
-                    <ArrowRight className="h-4 w-4 md:h-5 md:w-5" />
-                  </Button>
-                </Link>
-              </CardContent>
-            </Card>
+            <ScrollAnimation animation="zoom-in">
+              <Card className="border-0 bg-gradient-to-r from-primary/10 to-accent/20">
+                <CardContent className="py-10 md:py-12 text-center">
+                  <div className="flex justify-center mb-6">
+                    <Users className="h-12 w-12 md:h-16 md:w-16 text-primary" />
+                  </div>
+                  <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4">
+                    Ready to Start Your Journey?
+                  </h2>
+                  <p className="text-muted-foreground max-w-xl mx-auto mb-6 md:mb-8 text-sm md:text-base">
+                    Join thousands of Kenyans who are building their financial
+                    future together. Start with just Ksh 20 today.
+                  </p>
+                  <Link href="/signup">
+                    <Button
+                      size="lg"
+                      className="gap-2 px-6 py-4 md:px-8 md:py-6 text-base md:text-lg"
+                      data-testid="cta-join-button"
+                    >
+                      Create Free Account{" "}
+                      <ArrowRight className="h-4 w-4 md:h-5 md:w-5" />
+                    </Button>
+                  </Link>
+                </CardContent>
+              </Card>
+            </ScrollAnimation>
           </div>
         </section>
       </main>

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import {
   Menu,
   X,
   Sun,
   Moon,
+  Monitor,
   User,
   LogOut,
   LayoutDashboard,
@@ -46,9 +47,21 @@ export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [location] = useLocation();
   const { user, isAuthenticated, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, themePreference, setThemePreference } = useTheme();
 
   const isAdmin = user?.role === "admin" || user?.role === "superadmin";
+
+  // Disable scrolling when mobile menu is open
+  useEffect(() => {
+    if (mobileMenuOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [mobileMenuOpen]);
 
   const getInitials = (name: string) => {
     return name
@@ -60,14 +73,12 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 rounded-b-3xl">
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-              YB
-            </div>
-            <span className="font-bold text-lg hidden sm:inline-block">
+            <img src="/favicon.jpg" alt="YAHOO-BOYZ" className="h-9 w-9 rounded-full object-cover" />
+            <span className="font-bold text-lg">
               YAHOO-BOYZ
             </span>
           </Link>
@@ -125,18 +136,44 @@ export function Header() {
           </nav>
 
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={toggleTheme}
-              data-testid="button-theme-toggle"
-            >
-              {theme === "light" ? (
-                <Moon className="h-5 w-5" />
-              ) : (
-                <Sun className="h-5 w-5" />
-              )}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  data-testid="button-theme-toggle"
+                >
+                  {theme === "light" ? (
+                    <Sun className="h-5 w-5" />
+                  ) : (
+                    <Moon className="h-5 w-5" />
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => setThemePreference("light")}
+                  className={themePreference === "light" ? "bg-accent" : ""}
+                >
+                  <Sun className="mr-2 h-4 w-4" />
+                  Light
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setThemePreference("dark")}
+                  className={themePreference === "dark" ? "bg-accent" : ""}
+                >
+                  <Moon className="mr-2 h-4 w-4" />
+                  Dark
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setThemePreference("system")}
+                  className={themePreference === "system" ? "bg-accent" : ""}
+                >
+                  <Monitor className="mr-2 h-4 w-4" />
+                  System
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {isAuthenticated && user ? (
               <DropdownMenu>
@@ -227,8 +264,12 @@ export function Header() {
           </div>
         </div>
 
-        {mobileMenuOpen && (
-          <div className="md:hidden border-t py-4 space-y-2">
+        <div 
+          className={`md:hidden border-t overflow-hidden transition-all duration-300 ease-in-out ${
+            mobileMenuOpen ? "max-h-[600px] opacity-100 py-4" : "max-h-0 opacity-0 py-0"
+          }`}
+        >
+          <div className="space-y-2">
             {isAuthenticated && user ? (
               <>
                 <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)}>
@@ -275,22 +316,6 @@ export function Header() {
                     </Button>
                   </Link>
                 )}
-                <div className="pt-2 border-t space-y-2">
-                  <Link href="/profile" onClick={() => setMobileMenuOpen(false)}>
-                    <Button variant={location === "/profile" ? "secondary" : "ghost"} className="w-full justify-start gap-2">
-                      <User className="h-4 w-4" />
-                      Profile
-                    </Button>
-                  </Link>
-                  <Button 
-                    variant="ghost" 
-                    className="w-full justify-start gap-2 text-destructive hover:text-destructive"
-                    onClick={() => { logout(); setMobileMenuOpen(false); }}
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </Button>
-                </div>
               </>
             ) : (
               <>
@@ -328,7 +353,7 @@ export function Header() {
               </>
             )}
           </div>
-        )}
+        </div>
       </div>
     </header>
   );

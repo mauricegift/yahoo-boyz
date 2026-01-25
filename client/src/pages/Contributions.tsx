@@ -50,6 +50,7 @@ interface ContributionStats {
   daysAhead: number;
   daysBehind: number;
   missedAmount: number;
+  nextContributionTime: string | null;
 }
 
 interface ContributionsResponse {
@@ -120,15 +121,20 @@ export default function Contributions() {
       contribution.status === "pending",
   );
 
-  // Calculate countdown until next contribution
+  // Calculate countdown until next contribution using exact 24-hour window from backend
   useEffect(() => {
-    if (hasContributedToday) {
+    if (stats?.nextContributionTime) {
       const updateCountdown = () => {
         const now = new Date();
-        const tomorrow = addDays(new Date(), 1);
-        tomorrow.setHours(0, 0, 0, 0);
+        const nextTime = new Date(stats.nextContributionTime!);
 
-        const diffMs = differenceInMilliseconds(tomorrow, now);
+        const diffMs = nextTime.getTime() - now.getTime();
+        
+        if (diffMs <= 0) {
+          setTimeUntilNextContribution("Now available");
+          return;
+        }
+        
         const hours = Math.floor(diffMs / (1000 * 60 * 60));
         const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
         const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
@@ -141,7 +147,7 @@ export default function Contributions() {
 
       return () => clearInterval(interval);
     }
-  }, [hasContributedToday]);
+  }, [stats?.nextContributionTime]);
 
   const contributeMutation = useMutation({
     mutationFn: async (data: { amount: number; phone?: string }) => {
@@ -304,7 +310,7 @@ export default function Contributions() {
                     <p className="text-xs sm:text-sm text-green-600 dark:text-green-400">
                       Next contribution in:{" "}
                       <span className="font-bold">
-                        {timeUntilNextContribution}
+                        {timeUntilNextContribution || "Loading..."}
                       </span>
                     </p>
                   </div>

@@ -1820,17 +1820,19 @@ export default function AdminPage() {
                                         <Badge variant="destructive">New</Badge>
                                       )}
                                     </div>
-                                    <div className="text-sm text-muted-foreground mb-2">
+                                    <div className="text-sm text-muted-foreground mb-2 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-1 sm:gap-0">
                                       <span className="font-medium text-foreground">{message.userName || `User #${message.userId}`}</span>
-                                      <span className="mx-1">|</span>
-                                      <span>{message.userPhone}</span>
-                                      <span className="mx-1">|</span>
-                                      <span>{message.userEmail}</span>
-                                      <span className="mx-2">•</span>
+                                      <span className="hidden sm:inline mx-1">|</span>
+                                      <span className="text-xs sm:text-sm">{message.userPhone}</span>
+                                      <span className="hidden sm:inline mx-1">|</span>
+                                      <span className="text-xs sm:text-sm break-all">{message.userEmail}</span>
+                                      <span className="hidden sm:inline mx-2">•</span>
+                                      <span className="text-xs sm:text-sm">
                                       {format(
                                         new Date(message.createdAt),
                                         "MMM d, yyyy 'at' h:mm a",
                                       )}
+                                      </span>
                                     </div>
                                     <p className="mb-3">{message.message}</p>
                                     {message.adminReply && (

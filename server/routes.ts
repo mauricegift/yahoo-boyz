@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import 'dotenv/config';
+import "dotenv/config";
 import {
   signupSchema,
   loginSchema,
@@ -15,19 +15,14 @@ import {
   type User,
 } from "@shared/schema";
 
-const JWT_SECRET =
-  process.env.JWT_SECRET ||
-  process.env.SESSION_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET;
 
 // API configuration
-const EMAIL_API_URL =
-  process.env.EMAIL_API_URL;
-const SMS_API_URL =
-  process.env.SMS_API_URL;
+const EMAIL_API_URL = process.env.EMAIL_API_URL;
+const SMS_API_URL = process.env.SMS_API_URL;
 const SMS_API_TOKEN = process.env.SMS_API_TOKEN;
 const SMS_SENDER_ID = process.env.SMS_SENDER_ID;
-const MPESA_API_URL =
-  process.env.MPESA_API_URL;
+const MPESA_API_URL = process.env.MPESA_API_URL;
 
 // JWT middleware
 interface AuthRequest extends Request {
@@ -50,7 +45,9 @@ function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
           return res.status(401).json({ message: "User not found" });
         }
         if (user.isDisabled) {
-          return res.status(403).json({ message: "Access denied. Please contact administrator." });
+          return res
+            .status(403)
+            .json({ message: "Access denied. Please contact administrator." });
         }
         req.user = user;
         next();
@@ -204,7 +201,11 @@ async function sendOTPWithFallback(
   }
 
   console.error("Both email and SMS services failed");
-  return { success: false, usedMethod: "none", error: "Both email and SMS services failed" };
+  return {
+    success: false,
+    usedMethod: "none",
+    error: "Both email and SMS services failed",
+  };
 }
 
 // M-Pesa STK Push (keep as is)
@@ -384,8 +385,8 @@ export async function registerRoutes(
 
       // Check if user is disabled
       if (user.isDisabled) {
-        return res.status(403).json({ 
-          message: "Access denied. Please contact administrator." 
+        return res.status(403).json({
+          message: "Access denied. Please contact administrator.",
         });
       }
 
@@ -725,24 +726,24 @@ export async function registerRoutes(
       try {
         const userId = req.user!.id;
         const user = await storage.getUserById(userId);
-        
+
         // Use user's stored totals (reflects admin edits)
         const userTotal = parseFloat(user?.totalContributions || "0");
         const userTotalSavings = parseFloat(user?.totalSavings || "0");
         const userTotalLoans = parseFloat(user?.totalLoans || "0");
-        
+
         // Calculate group totals from all user totals
         const allUsers = await storage.getAllUsers();
         let groupTotal = 0;
         let groupTotalSavings = 0;
         let groupTotalLoans = 0;
-        
+
         for (const u of allUsers) {
           groupTotal += parseFloat(u.totalContributions) || 0;
           groupTotalSavings += parseFloat(u.totalSavings) || 0;
           groupTotalLoans += parseFloat(u.totalLoans) || 0;
         }
-        
+
         const loans = await storage.getLoansByUserId(userId);
         const activeLoans = loans.filter((l) => l.status === "approved").length;
         const missedContributions =
@@ -751,31 +752,42 @@ export async function registerRoutes(
         // Calculate contribution days tracking
         const totalContributed = Number(userTotal) || 0;
         const daysCovered = Math.floor(totalContributed / 20); // Each 20 Ksh covers 1 day
-        
+
         // Get the first contribution date or account creation date
-        const contributions = await storage.getContributionsByUserId(userId, 1000, 0);
-        const completedContributions = contributions.filter(c => c.status === "completed");
-        
+        const contributions = await storage.getContributionsByUserId(
+          userId,
+          1000,
+          0,
+        );
+        const completedContributions = contributions.filter(
+          (c) => c.status === "completed",
+        );
+
         let daysElapsed = 0;
         let daysAhead = 0;
         let daysBehind = 0;
         let nextContributionTime: Date | null = null;
-        
+
         const now = new Date();
-        
+
         if (completedContributions.length > 0) {
           // Get the last successful contribution (contributions are sorted by createdAt desc)
           const lastContribution = completedContributions[0];
           if (lastContribution.nextContributionTime) {
-            nextContributionTime = new Date(lastContribution.nextContributionTime);
+            nextContributionTime = new Date(
+              lastContribution.nextContributionTime,
+            );
           } else {
             // If no nextContributionTime, calculate 24 hours from last contribution
             nextContributionTime = new Date(lastContribution.createdAt);
-            nextContributionTime.setTime(nextContributionTime.getTime() + 24 * 60 * 60 * 1000);
+            nextContributionTime.setTime(
+              nextContributionTime.getTime() + 24 * 60 * 60 * 1000,
+            );
           }
-          
+
           // Calculate days since first contribution
-          const firstContribution = completedContributions[completedContributions.length - 1];
+          const firstContribution =
+            completedContributions[completedContributions.length - 1];
           const firstDate = new Date(firstContribution.createdAt);
           const diffTime = now.getTime() - firstDate.getTime();
           daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 because the first day counts
@@ -785,7 +797,7 @@ export async function registerRoutes(
           const diffTime = now.getTime() - accountCreatedDate.getTime();
           daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 because the first day counts
         }
-        
+
         // Calculate days ahead or behind
         if (daysCovered >= daysElapsed) {
           daysAhead = daysCovered - daysElapsed;
@@ -861,17 +873,17 @@ export async function registerRoutes(
       try {
         const userId = req.user!.id;
         const user = await storage.getUserById(userId);
-        
+
         // Use user's stored totals (authoritative - same as Dashboard)
         const userTotal = parseFloat(user?.totalSavings || "0");
-        
+
         // Calculate group total from all user totals
         const allUsers = await storage.getAllUsers();
         let groupTotal = 0;
         for (const u of allUsers) {
           groupTotal += parseFloat(u.totalSavings) || 0;
         }
-        
+
         const recentSavings = await storage.getRecentSavings(userId, 5);
 
         res.json({
@@ -1198,17 +1210,17 @@ export async function registerRoutes(
       try {
         const userId = req.user!.id;
         const user = await storage.getUserById(userId);
-        
+
         // Use user's stored totals (authoritative - same as Dashboard)
         const userTotal = parseFloat(user?.totalContributions || "0");
-        
+
         // Calculate group total from all user totals
         const allUsers = await storage.getAllUsers();
         let groupTotal = 0;
         for (const u of allUsers) {
           groupTotal += parseFloat(u.totalContributions) || 0;
         }
-        
+
         const contributions = await storage.getContributionsByUserId(userId);
 
         // Calculate this month's contributions
@@ -1232,14 +1244,17 @@ export async function registerRoutes(
         // Calculate days behind/ahead (same as Dashboard)
         const totalContributed = Number(userTotal) || 0;
         const daysCovered = Math.floor(totalContributed / 20);
-        const completedContributions = contributions.filter(c => c.status === "completed");
-        
+        const completedContributions = contributions.filter(
+          (c) => c.status === "completed",
+        );
+
         let daysElapsed = 0;
         let daysAhead = 0;
         let daysBehind = 0;
-        
+
         if (completedContributions.length > 0) {
-          const firstContribution = completedContributions[completedContributions.length - 1];
+          const firstContribution =
+            completedContributions[completedContributions.length - 1];
           const firstDate = new Date(firstContribution.createdAt);
           const diffTime = now.getTime() - firstDate.getTime();
           daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
@@ -1248,11 +1263,23 @@ export async function registerRoutes(
           const diffTime = now.getTime() - accountCreatedDate.getTime();
           daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
         }
-        
+
         if (daysCovered >= daysElapsed) {
           daysAhead = daysCovered - daysElapsed;
         } else {
           daysBehind = daysElapsed - daysCovered;
+        }
+
+        // Calculate nextContributionTime (same as Dashboard)
+        let nextContributionTime: Date | null = null;
+        if (completedContributions.length > 0) {
+          const lastContribution = completedContributions[0];
+          if (lastContribution.nextContributionTime) {
+            nextContributionTime = new Date(lastContribution.nextContributionTime);
+          } else {
+            nextContributionTime = new Date(lastContribution.createdAt);
+            nextContributionTime.setTime(nextContributionTime.getTime() + 24 * 60 * 60 * 1000);
+          }
         }
 
         res.json({
@@ -1265,6 +1292,7 @@ export async function registerRoutes(
           daysAhead,
           daysBehind,
           missedAmount: daysBehind * 20,
+          nextContributionTime: nextContributionTime?.toISOString() || null,
         });
       } catch (error: any) {
         res
@@ -1955,8 +1983,9 @@ export async function registerRoutes(
         const userId = req.user!.id;
 
         // Get all unpaid missed contributions
-        const missedContributions = await storage.getUnpaidMissedContributions(userId);
-        
+        const missedContributions =
+          await storage.getUnpaidMissedContributions(userId);
+
         if (missedContributions.length === 0) {
           return res.status(400).json({
             success: false,
@@ -1987,7 +2016,10 @@ export async function registerRoutes(
 
         if (formattedPhone.startsWith("0")) {
           formattedPhone = "254" + formattedPhone.substring(1);
-        } else if (formattedPhone.startsWith("7") && formattedPhone.length === 9) {
+        } else if (
+          formattedPhone.startsWith("7") &&
+          formattedPhone.length === 9
+        ) {
           formattedPhone = "254" + formattedPhone;
         } else if (!formattedPhone.startsWith("254")) {
           formattedPhone = "254" + formattedPhone;
@@ -2033,14 +2065,14 @@ export async function registerRoutes(
         if (result.success && result.CheckoutRequestID) {
           // Calculate how many missed days this payment covers (20 per day)
           const daysCovered = Math.floor(roundedAmount / 20);
-          
+
           // Start polling for payment status
           setTimeout(() => {
             checkMissedPaymentStatus(
               result.CheckoutRequestID,
               userId,
               daysCovered,
-              missedContributions.slice(0, daysCovered).map((m) => m.id)
+              missedContributions.slice(0, daysCovered).map((m) => m.id),
             );
           }, 10000);
 
@@ -2059,7 +2091,8 @@ export async function registerRoutes(
       } catch (error: any) {
         res.status(400).json({
           success: false,
-          message: error.message || "Failed to initiate missed contributions payment",
+          message:
+            error.message || "Failed to initiate missed contributions payment",
         });
       }
     },
@@ -2073,7 +2106,10 @@ export async function registerRoutes(
     missedIds: number[],
   ) {
     try {
-      console.log("Checking missed contributions payment status for:", checkoutRequestId);
+      console.log(
+        "Checking missed contributions payment status for:",
+        checkoutRequestId,
+      );
 
       const response = await fetch(
         `${MPESA_API_URL}/api/verify-transaction.php`,
@@ -2107,9 +2143,17 @@ export async function registerRoutes(
         mpesaResult.status === "pending"
       ) {
         // Payment still pending, check again in 10 seconds
-        console.log(`Missed contributions payment still pending, checking again in 10s...`);
+        console.log(
+          `Missed contributions payment still pending, checking again in 10s...`,
+        );
         setTimeout(
-          () => checkMissedPaymentStatus(checkoutRequestId, userId, daysCovered, missedIds),
+          () =>
+            checkMissedPaymentStatus(
+              checkoutRequestId,
+              userId,
+              daysCovered,
+              missedIds,
+            ),
           10000,
         );
       } else {
@@ -2119,7 +2163,13 @@ export async function registerRoutes(
       console.error("Missed contributions payment status check error:", error);
       // Try again in 10 seconds
       setTimeout(
-        () => checkMissedPaymentStatus(checkoutRequestId, userId, daysCovered, missedIds),
+        () =>
+          checkMissedPaymentStatus(
+            checkoutRequestId,
+            userId,
+            daysCovered,
+            missedIds,
+          ),
         10000,
       );
     }
@@ -2148,12 +2198,16 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const validatedData = loanApplicationSchema.parse(req.body);
-        const { amount, duration, loanUsage, guarantor1, guarantor2 } = validatedData;
+        const { amount, duration, loanUsage, guarantor1, guarantor2 } =
+          validatedData;
 
         // Check for existing pending or active loan
         const existingLoans = await storage.getLoansByUserId(req.user!.id);
         const hasPendingLoan = existingLoans.some(
-          (l) => l.status === "pending" || l.status === "approved" || l.status === "overdue",
+          (l) =>
+            l.status === "pending" ||
+            l.status === "approved" ||
+            l.status === "overdue",
         );
         if (hasPendingLoan) {
           return res
@@ -2166,31 +2220,46 @@ export async function registerRoutes(
         if (userSavings < 1000) {
           return res
             .status(400)
-            .json({ message: "You need at least Ksh 1,000 in savings to apply for a loan" });
+            .json({
+              message:
+                "You need at least Ksh 1,000 in savings to apply for a loan",
+            });
         }
 
         // Check user has no unpaid missed contributions
-        const missedContributions = await storage.getMissedContributionsByUserId(req.user!.id);
+        const missedContributions =
+          await storage.getMissedContributionsByUserId(req.user!.id);
         const unpaidMissed = missedContributions.filter((m) => !m.isPaid);
         if (unpaidMissed.length > 0) {
           return res
             .status(400)
-            .json({ message: "Please pay all your missed contribution penalties before applying for a loan" });
+            .json({
+              message:
+                "Please pay all your missed contribution penalties before applying for a loan",
+            });
         }
 
         // Find guarantors by email or phone
-        const guarantor1User = await storage.getUserByEmailOrPhone(guarantor1.trim());
-        const guarantor2User = await storage.getUserByEmailOrPhone(guarantor2.trim());
+        const guarantor1User = await storage.getUserByEmailOrPhone(
+          guarantor1.trim(),
+        );
+        const guarantor2User = await storage.getUserByEmailOrPhone(
+          guarantor2.trim(),
+        );
 
         if (!guarantor1User) {
           return res
             .status(400)
-            .json({ message: `Guarantor 1 (${guarantor1}) is not a registered member` });
+            .json({
+              message: `Guarantor 1 (${guarantor1}) is not a registered member`,
+            });
         }
         if (!guarantor2User) {
           return res
             .status(400)
-            .json({ message: `Guarantor 2 (${guarantor2}) is not a registered member` });
+            .json({
+              message: `Guarantor 2 (${guarantor2}) is not a registered member`,
+            });
         }
 
         // Check guarantors are not the same person
@@ -2201,20 +2270,23 @@ export async function registerRoutes(
         }
 
         // Check guarantors are not the applicant
-        if (guarantor1User.id === req.user!.id || guarantor2User.id === req.user!.id) {
+        if (
+          guarantor1User.id === req.user!.id ||
+          guarantor2User.id === req.user!.id
+        ) {
           return res
             .status(400)
             .json({ message: "You cannot be your own guarantor" });
         }
 
         // Check combined savings of guarantors >= loan amount
-        const guarantorsTotalSavings = Number(guarantor1User.totalSavings || 0) + Number(guarantor2User.totalSavings || 0);
+        const guarantorsTotalSavings =
+          Number(guarantor1User.totalSavings || 0) +
+          Number(guarantor2User.totalSavings || 0);
         if (guarantorsTotalSavings < amount) {
-          return res
-            .status(400)
-            .json({ 
-              message: `Guarantors' combined savings (Ksh ${guarantorsTotalSavings.toLocaleString()}) must be at least equal to the loan amount (Ksh ${amount.toLocaleString()})` 
-            });
+          return res.status(400).json({
+            message: `Guarantors' combined savings (Ksh ${guarantorsTotalSavings.toLocaleString()}) must be at least equal to the loan amount (Ksh ${amount.toLocaleString()})`,
+          });
         }
 
         // Calculate total with 15% interest
@@ -2472,20 +2544,22 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const messages = await storage.getContactMessagesByUserId(req.user!.id);
-        
+
         // Add admin details to replied messages
-        const result = await Promise.all(messages.map(async (m) => {
-          if (m.repliedBy) {
-            const admin = await storage.getUserById(m.repliedBy);
-            return {
-              ...m,
-              repliedByName: admin?.name,
-              repliedByPhone: admin?.phone,
-            };
-          }
-          return m;
-        }));
-        
+        const result = await Promise.all(
+          messages.map(async (m) => {
+            if (m.repliedBy) {
+              const admin = await storage.getUserById(m.repliedBy);
+              return {
+                ...m,
+                repliedByName: admin?.name,
+                repliedByPhone: admin?.phone,
+              };
+            }
+            return m;
+          }),
+        );
+
         res.json(result);
       } catch (error: any) {
         res
@@ -2527,18 +2601,18 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const users = await storage.getAllUsers();
-        
+
         // Calculate group totals from user totals (so admin edits are reflected)
         let totalContributions = 0;
         let totalSavings = 0;
         let totalLoans = 0;
-        
+
         for (const user of users) {
           totalContributions += parseFloat(user.totalContributions) || 0;
           totalSavings += parseFloat(user.totalSavings) || 0;
           totalLoans += parseFloat(user.totalLoans) || 0;
         }
-        
+
         const allLoans = await storage.getAllLoans();
         const pendingLoans = await storage.getPendingLoans();
         const overdueLoans = await storage.getOverdueLoans();
@@ -2570,26 +2644,29 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const users = await storage.getAllUsers();
-        
+
         // Add contribution tracking info for each user
         const usersWithTracking = await Promise.all(
           users.map(async ({ password, ...user }) => {
             // Use user.totalContributions / 20 for daysCovered (consistent with Dashboard and Contributions page)
             const totalContributed = Number(user.totalContributions) || 0;
             const daysCovered = Math.floor(totalContributed / 20);
-            
+
             // Calculate days elapsed since first contribution OR account creation
-            const contributions = await storage.getContributionsByUserId(user.id);
-            const completedContributions = contributions.filter(
-              (c) => c.status === "completed"
+            const contributions = await storage.getContributionsByUserId(
+              user.id,
             );
-            
+            const completedContributions = contributions.filter(
+              (c) => c.status === "completed",
+            );
+
             let daysElapsed = 0;
             const now = new Date();
-            
+
             if (completedContributions.length > 0) {
               // Get days since first contribution
-              const firstContribution = completedContributions[completedContributions.length - 1];
+              const firstContribution =
+                completedContributions[completedContributions.length - 1];
               const firstDate = new Date(firstContribution.createdAt);
               const diffTime = now.getTime() - firstDate.getTime();
               daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
@@ -2599,11 +2676,11 @@ export async function registerRoutes(
               const diffTime = now.getTime() - accountCreatedDate.getTime();
               daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
             }
-            
+
             const daysBehind = Math.max(0, daysElapsed - daysCovered);
             const daysAhead = Math.max(0, daysCovered - daysElapsed);
             const missedAmount = daysBehind * 20;
-            
+
             return {
               ...user,
               daysCovered,
@@ -2612,9 +2689,9 @@ export async function registerRoutes(
               daysAhead,
               missedAmount,
             };
-          })
+          }),
         );
-        
+
         res.json(usersWithTracking);
       } catch (error: any) {
         res
@@ -2652,7 +2729,9 @@ export async function registerRoutes(
 
         // Superadmins cannot be modified by anyone (except themselves for profile updates)
         if (user.role === "superadmin") {
-          return res.status(403).json({ message: "Superadmin account cannot be modified" });
+          return res
+            .status(403)
+            .json({ message: "Superadmin account cannot be modified" });
         }
 
         // Admins can edit basic user info and financial data
@@ -2660,11 +2739,17 @@ export async function registerRoutes(
         if (req.user!.role !== "superadmin") {
           // Admins cannot change role to superadmin
           if (role !== undefined && role === "superadmin") {
-            return res.status(403).json({ message: "Only superadmin can promote users to superadmin" });
+            return res
+              .status(403)
+              .json({
+                message: "Only superadmin can promote users to superadmin",
+              });
           }
           // Admins cannot disable other users
           if (isDisabled !== undefined && isDisabled !== user.isDisabled) {
-            return res.status(403).json({ message: "Only superadmin can disable users" });
+            return res
+              .status(403)
+              .json({ message: "Only superadmin can disable users" });
           }
         }
 
@@ -2849,31 +2934,33 @@ export async function registerRoutes(
       try {
         const loans = await storage.getAllLoans();
         const users = await storage.getAllUsers();
-        const userMap = new Map(users.map(u => [u.id, u]));
-        
+        const userMap = new Map(users.map((u) => [u.id, u]));
+
         // Get guarantors for each loan
-        const result = await Promise.all(loans.map(async (loan) => {
-          const guarantors = await storage.getLoanGuarantorsByLoanId(loan.id);
-          const guarantorDetails = guarantors.map(g => {
-            const guarantorUser = userMap.get(g.guarantorId);
+        const result = await Promise.all(
+          loans.map(async (loan) => {
+            const guarantors = await storage.getLoanGuarantorsByLoanId(loan.id);
+            const guarantorDetails = guarantors.map((g) => {
+              const guarantorUser = userMap.get(g.guarantorId);
+              return {
+                ...g,
+                guarantorName: guarantorUser?.name,
+                guarantorEmail: guarantorUser?.email,
+                guarantorPhone: guarantorUser?.phone,
+                guarantorSavings: guarantorUser?.totalSavings,
+              };
+            });
+
             return {
-              ...g,
-              guarantorName: guarantorUser?.name,
-              guarantorEmail: guarantorUser?.email,
-              guarantorPhone: guarantorUser?.phone,
-              guarantorSavings: guarantorUser?.totalSavings,
+              ...loan,
+              userName: userMap.get(loan.userId)?.name,
+              userEmail: userMap.get(loan.userId)?.email,
+              userPhone: userMap.get(loan.userId)?.phone,
+              guarantors: guarantorDetails,
             };
-          });
-          
-          return {
-            ...loan,
-            userName: userMap.get(loan.userId)?.name,
-            userEmail: userMap.get(loan.userId)?.email,
-            userPhone: userMap.get(loan.userId)?.phone,
-            guarantors: guarantorDetails,
-          };
-        }));
-        
+          }),
+        );
+
         res.json(result);
       } catch (error: any) {
         res
@@ -2891,30 +2978,32 @@ export async function registerRoutes(
       try {
         const loans = await storage.getPendingLoans();
         const users = await storage.getAllUsers();
-        const userMap = new Map(users.map(u => [u.id, u]));
-        
-        const result = await Promise.all(loans.map(async (loan) => {
-          const guarantors = await storage.getLoanGuarantorsByLoanId(loan.id);
-          const guarantorDetails = guarantors.map(g => {
-            const guarantorUser = userMap.get(g.guarantorId);
+        const userMap = new Map(users.map((u) => [u.id, u]));
+
+        const result = await Promise.all(
+          loans.map(async (loan) => {
+            const guarantors = await storage.getLoanGuarantorsByLoanId(loan.id);
+            const guarantorDetails = guarantors.map((g) => {
+              const guarantorUser = userMap.get(g.guarantorId);
+              return {
+                ...g,
+                guarantorName: guarantorUser?.name,
+                guarantorEmail: guarantorUser?.email,
+                guarantorPhone: guarantorUser?.phone,
+                guarantorSavings: guarantorUser?.totalSavings,
+              };
+            });
+
             return {
-              ...g,
-              guarantorName: guarantorUser?.name,
-              guarantorEmail: guarantorUser?.email,
-              guarantorPhone: guarantorUser?.phone,
-              guarantorSavings: guarantorUser?.totalSavings,
+              ...loan,
+              userName: userMap.get(loan.userId)?.name,
+              userEmail: userMap.get(loan.userId)?.email,
+              userPhone: userMap.get(loan.userId)?.phone,
+              guarantors: guarantorDetails,
             };
-          });
-          
-          return {
-            ...loan,
-            userName: userMap.get(loan.userId)?.name,
-            userEmail: userMap.get(loan.userId)?.email,
-            userPhone: userMap.get(loan.userId)?.phone,
-            guarantors: guarantorDetails,
-          };
-        }));
-        
+          }),
+        );
+
         res.json(result);
       } catch (error: any) {
         res
@@ -3042,7 +3131,8 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const loanId = parseInt(req.params.id);
-        const guarantors = await storage.getLoanGuarantorsWithUsersByLoanId(loanId);
+        const guarantors =
+          await storage.getLoanGuarantorsWithUsersByLoanId(loanId);
         res.json(guarantors);
       } catch (error: any) {
         res
@@ -3067,12 +3157,17 @@ export async function registerRoutes(
         }
 
         if (loan.status !== "overdue") {
-          return res.status(400).json({ message: "Can only auto-pay overdue loans" });
+          return res
+            .status(400)
+            .json({ message: "Can only auto-pay overdue loans" });
         }
 
-        const remainingAmount = Number(loan.totalAmount) - Number(loan.amountPaid);
+        const remainingAmount =
+          Number(loan.totalAmount) - Number(loan.amountPaid);
         if (remainingAmount <= 0) {
-          return res.status(400).json({ message: "Loan is already fully paid" });
+          return res
+            .status(400)
+            .json({ message: "Loan is already fully paid" });
         }
 
         // Deduct from guarantors' savings
@@ -3084,8 +3179,8 @@ export async function registerRoutes(
           status: "paid",
         });
 
-        res.json({ 
-          message: `Auto-pay successful. Ksh ${remainingAmount.toLocaleString()} deducted from guarantors' savings.` 
+        res.json({
+          message: `Auto-pay successful. Ksh ${remainingAmount.toLocaleString()} deducted from guarantors' savings.`,
         });
       } catch (error: any) {
         res
@@ -3104,26 +3199,27 @@ export async function registerRoutes(
         const { search } = req.query;
         const contributions = await storage.getAllContributions();
         const users = await storage.getAllUsers();
-        const userMap = new Map(users.map(u => [u.id, u]));
-        
-        let result = contributions.map(c => ({
+        const userMap = new Map(users.map((u) => [u.id, u]));
+
+        let result = contributions.map((c) => ({
           ...c,
           userName: userMap.get(c.userId)?.name,
           userEmail: userMap.get(c.userId)?.email,
           userPhone: userMap.get(c.userId)?.phone,
         }));
-        
+
         // Apply search filter if provided
-        if (search && typeof search === 'string') {
+        if (search && typeof search === "string") {
           const searchLower = search.toLowerCase();
-          result = result.filter(c => 
-            c.mpesaReceiptNumber?.toLowerCase().includes(searchLower) ||
-            c.userName?.toLowerCase().includes(searchLower) ||
-            c.userEmail?.toLowerCase().includes(searchLower) ||
-            c.userPhone?.toLowerCase().includes(searchLower)
+          result = result.filter(
+            (c) =>
+              c.mpesaReceiptNumber?.toLowerCase().includes(searchLower) ||
+              c.userName?.toLowerCase().includes(searchLower) ||
+              c.userEmail?.toLowerCase().includes(searchLower) ||
+              c.userPhone?.toLowerCase().includes(searchLower),
           );
         }
-        
+
         res.json(result);
       } catch (error: any) {
         res
@@ -3175,38 +3271,56 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const { contributionId, phone } = req.body;
-        
+
         if (!contributionId || !phone) {
-          return res.status(400).json({ message: "Contribution ID and phone number are required", success: false });
+          return res
+            .status(400)
+            .json({
+              message: "Contribution ID and phone number are required",
+              success: false,
+            });
         }
-        
+
         const contribution = await storage.getContributionById(contributionId);
         if (!contribution) {
-          return res.status(404).json({ message: "Contribution not found", success: false });
+          return res
+            .status(404)
+            .json({ message: "Contribution not found", success: false });
         }
-        
+
         if (contribution.status !== "failed") {
-          return res.status(400).json({ message: "Only failed contributions can be retried", success: false });
+          return res
+            .status(400)
+            .json({
+              message: "Only failed contributions can be retried",
+              success: false,
+            });
         }
-        
+
         // Format phone number
-        let formattedPhone = String(phone).trim().replace(/[^\d+]/g, "").replace(/\+/g, "");
+        let formattedPhone = String(phone)
+          .trim()
+          .replace(/[^\d+]/g, "")
+          .replace(/\+/g, "");
         if (formattedPhone.startsWith("0")) {
           formattedPhone = "254" + formattedPhone.substring(1);
-        } else if (formattedPhone.startsWith("7") && formattedPhone.length === 9) {
+        } else if (
+          formattedPhone.startsWith("7") &&
+          formattedPhone.length === 9
+        ) {
           formattedPhone = "254" + formattedPhone;
         } else if (!formattedPhone.startsWith("254")) {
           formattedPhone = "254" + formattedPhone;
         }
-        
+
         const roundedAmount = Math.ceil(Number(contribution.amount));
-        
+
         // Update the contribution to pending
         await storage.updateContribution(contributionId, {
           status: "pending",
           errorMessage: null,
         });
-        
+
         // Call M-Pesa API
         const mpesaResponse = await fetch(
           `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
@@ -3223,7 +3337,7 @@ export async function registerRoutes(
             }),
           },
         );
-        
+
         const resultText = await mpesaResponse.text();
         let result;
         try {
@@ -3238,22 +3352,23 @@ export async function registerRoutes(
             message: "Invalid response from M-Pesa API",
           });
         }
-        
+
         if (result.success && result.CheckoutRequestID) {
           await storage.updateContribution(contributionId, {
             mpesaCheckoutId: result.CheckoutRequestID,
           });
-          
+
           // Start polling for payment status
           setTimeout(() => {
             checkPaymentStatus(result.CheckoutRequestID);
           }, 10000);
-          
+
           return res.json({
             success: true,
             checkoutRequestId: result.CheckoutRequestID,
             contributionId: contributionId,
-            message: "Payment retry initiated. Check your phone for M-Pesa prompt.",
+            message:
+              "Payment retry initiated. Check your phone for M-Pesa prompt.",
           });
         } else {
           await storage.updateContribution(contributionId, {
@@ -3266,7 +3381,12 @@ export async function registerRoutes(
           });
         }
       } catch (error: any) {
-        res.status(400).json({ message: error.message || "Failed to retry contribution", success: false });
+        res
+          .status(400)
+          .json({
+            message: error.message || "Failed to retry contribution",
+            success: false,
+          });
       }
     },
   );
@@ -3279,38 +3399,56 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const { savingId, phone } = req.body;
-        
+
         if (!savingId || !phone) {
-          return res.status(400).json({ message: "Saving ID and phone number are required", success: false });
+          return res
+            .status(400)
+            .json({
+              message: "Saving ID and phone number are required",
+              success: false,
+            });
         }
-        
+
         const saving = await storage.getSavingById(savingId);
         if (!saving) {
-          return res.status(404).json({ message: "Saving not found", success: false });
+          return res
+            .status(404)
+            .json({ message: "Saving not found", success: false });
         }
-        
+
         if (saving.status !== "failed") {
-          return res.status(400).json({ message: "Only failed savings can be retried", success: false });
+          return res
+            .status(400)
+            .json({
+              message: "Only failed savings can be retried",
+              success: false,
+            });
         }
-        
+
         // Format phone number
-        let formattedPhone = String(phone).trim().replace(/[^\d+]/g, "").replace(/\+/g, "");
+        let formattedPhone = String(phone)
+          .trim()
+          .replace(/[^\d+]/g, "")
+          .replace(/\+/g, "");
         if (formattedPhone.startsWith("0")) {
           formattedPhone = "254" + formattedPhone.substring(1);
-        } else if (formattedPhone.startsWith("7") && formattedPhone.length === 9) {
+        } else if (
+          formattedPhone.startsWith("7") &&
+          formattedPhone.length === 9
+        ) {
           formattedPhone = "254" + formattedPhone;
         } else if (!formattedPhone.startsWith("254")) {
           formattedPhone = "254" + formattedPhone;
         }
-        
+
         const roundedAmount = Math.ceil(Number(saving.amount));
-        
+
         // Update the saving to pending
         await storage.updateSaving(savingId, {
           status: "pending",
           errorMessage: null,
         });
-        
+
         // Call M-Pesa API
         const mpesaResponse = await fetch(
           `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
@@ -3327,7 +3465,7 @@ export async function registerRoutes(
             }),
           },
         );
-        
+
         const resultText = await mpesaResponse.text();
         let result;
         try {
@@ -3342,22 +3480,23 @@ export async function registerRoutes(
             message: "Invalid response from M-Pesa API",
           });
         }
-        
+
         if (result.success && result.CheckoutRequestID) {
           await storage.updateSaving(savingId, {
             mpesaCheckoutId: result.CheckoutRequestID,
           });
-          
+
           // Start polling for payment status
           setTimeout(() => {
             checkSavingsPaymentStatus(result.CheckoutRequestID, savingId);
           }, 10000);
-          
+
           return res.json({
             success: true,
             checkoutRequestId: result.CheckoutRequestID,
             savingId: savingId,
-            message: "Payment retry initiated. Check your phone for M-Pesa prompt.",
+            message:
+              "Payment retry initiated. Check your phone for M-Pesa prompt.",
           });
         } else {
           await storage.updateSaving(savingId, {
@@ -3370,7 +3509,12 @@ export async function registerRoutes(
           });
         }
       } catch (error: any) {
-        res.status(400).json({ message: error.message || "Failed to retry saving", success: false });
+        res
+          .status(400)
+          .json({
+            message: error.message || "Failed to retry saving",
+            success: false,
+          });
       }
     },
   );
@@ -3384,26 +3528,27 @@ export async function registerRoutes(
         const { search } = req.query;
         const savings = await storage.getAllSavings();
         const users = await storage.getAllUsers();
-        const userMap = new Map(users.map(u => [u.id, u]));
-        
-        let result = savings.map(s => ({
+        const userMap = new Map(users.map((u) => [u.id, u]));
+
+        let result = savings.map((s) => ({
           ...s,
           userName: userMap.get(s.userId)?.name,
           userEmail: userMap.get(s.userId)?.email,
           userPhone: userMap.get(s.userId)?.phone,
         }));
-        
+
         // Apply search filter if provided
-        if (search && typeof search === 'string') {
+        if (search && typeof search === "string") {
           const searchLower = search.toLowerCase();
-          result = result.filter(s => 
-            s.mpesaReceiptNumber?.toLowerCase().includes(searchLower) ||
-            s.userName?.toLowerCase().includes(searchLower) ||
-            s.userEmail?.toLowerCase().includes(searchLower) ||
-            s.userPhone?.toLowerCase().includes(searchLower)
+          result = result.filter(
+            (s) =>
+              s.mpesaReceiptNumber?.toLowerCase().includes(searchLower) ||
+              s.userName?.toLowerCase().includes(searchLower) ||
+              s.userEmail?.toLowerCase().includes(searchLower) ||
+              s.userPhone?.toLowerCase().includes(searchLower),
           );
         }
-        
+
         res.json(result);
       } catch (error: any) {
         res
@@ -3420,19 +3565,23 @@ export async function registerRoutes(
     async (req: AuthRequest, res: Response) => {
       try {
         const users = await storage.getAllUsers();
-        const userMap = new Map(users.map(u => [u.id, u]));
+        const userMap = new Map(users.map((u) => [u.id, u]));
         const messages = await storage.getAllContactMessages();
-        
+
         // Add user and admin details to messages
-        const result = messages.map(m => ({
+        const result = messages.map((m) => ({
           ...m,
           userName: userMap.get(m.userId)?.name,
           userEmail: userMap.get(m.userId)?.email,
           userPhone: userMap.get(m.userId)?.phone,
-          repliedByName: m.repliedBy ? userMap.get(m.repliedBy)?.name : undefined,
-          repliedByPhone: m.repliedBy ? userMap.get(m.repliedBy)?.phone : undefined,
+          repliedByName: m.repliedBy
+            ? userMap.get(m.repliedBy)?.name
+            : undefined,
+          repliedByPhone: m.repliedBy
+            ? userMap.get(m.repliedBy)?.phone
+            : undefined,
         }));
-        
+
         res.json(result);
       } catch (error: any) {
         res

@@ -115,9 +115,7 @@ export default function ForgotPassword() {
             <Card>
               <CardHeader className="text-center">
                 <div className="flex justify-center mb-4">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg animate-in zoom-in duration-500">
-                    YB
-                  </div>
+                  <img src="/favicon.jpg" alt="YAHOO-BOYZ" className="h-12 w-12 rounded-full object-cover animate-in zoom-in duration-500" />
                 </div>
                 <CardTitle className="text-2xl">Forgot Password?</CardTitle>
                 <CardDescription>

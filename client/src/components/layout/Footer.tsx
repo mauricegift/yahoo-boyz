@@ -13,9 +13,7 @@ export function Footer() {
           <ScrollAnimation animation="fade-up" delay={0}>
             <div className="space-y-4">
               <div className="flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-                  YB
-                </div>
+                <img src="/favicon.jpg" alt="YAHOO-BOYZ" className="h-9 w-9 rounded-full object-cover" />
                 <span className="font-bold text-lg">YAHOO-BOYZ</span>
               </div>
               <p className="text-sm text-muted-foreground">

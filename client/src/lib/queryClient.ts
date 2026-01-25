@@ -1,8 +1,34 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
-async function throwIfResNotOk(res: Response) {
+// Auth endpoints where 401/403 should NOT trigger redirect
+const AUTH_ENDPOINTS = [
+  "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
+  "/api/auth/verify-otp",
+  "/api/auth/resend-otp",
+];
+
+async function throwIfResNotOk(res: Response, url?: string) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
+    
+    // Check if this is an auth endpoint - don't redirect, just throw error
+    const isAuthEndpoint = url && AUTH_ENDPOINTS.some(endpoint => url.includes(endpoint));
+    
+    if (isAuthEndpoint) {
+      // For auth endpoints, just throw the error message without redirecting
+      try {
+        const errorData = JSON.parse(text);
+        throw new Error(errorData.message || errorData.error || "Authentication failed");
+      } catch (e) {
+        if (e instanceof SyntaxError) {
+          throw new Error(text || "Authentication failed");
+        }
+        throw e;
+      }
+    }
     
     // Handle disabled user - auto logout on 403 with access denied message
     if (res.status === 403 && text.includes("Access denied")) {
@@ -55,7 +81,7 @@ export async function apiRequest(
     credentials: "include",
   });
 
-  await throwIfResNotOk(res);
+  await throwIfResNotOk(res, url);
   return res.json();
 }
 

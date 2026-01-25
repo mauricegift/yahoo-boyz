@@ -99,9 +99,7 @@ export default function Login() {
             <Card className="w-full">
               <CardHeader className="text-center px-4 sm:px-6">
                 <div className="flex justify-center mb-4">
-                  <div className="flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg sm:text-xl animate-in zoom-in duration-500">
-                    YB
-                  </div>
+                  <img src="/favicon.jpg" alt="YAHOO-BOYZ" className="h-12 w-12 sm:h-14 sm:w-14 rounded-full object-cover animate-in zoom-in duration-500" />
                 </div>
                 <CardTitle className="text-xl sm:text-2xl">Welcome Back</CardTitle>
                 <CardDescription className="text-sm sm:text-base">

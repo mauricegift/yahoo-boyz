@@ -940,7 +940,7 @@ export async function registerRoutes(
 
         // Call M-Pesa API
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/pay.php`,
+          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
           {
             method: "POST",
             headers: {
@@ -1385,7 +1385,7 @@ export async function registerRoutes(
 
         // Call M-Pesa API (using your preferred endpoint)
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/pay.php`,
+          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
           {
             method: "POST",
             headers: {
@@ -1835,7 +1835,7 @@ export async function registerRoutes(
         });
 
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/pay.php`,
+          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
           {
             method: "POST",
             headers: {
@@ -2002,7 +2002,7 @@ export async function registerRoutes(
         });
 
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/pay.php`,
+          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
           {
             method: "POST",
             headers: {
@@ -2309,7 +2309,7 @@ export async function registerRoutes(
 
         // Call M-Pesa API
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/pay.php`,
+          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
           {
             method: "POST",
             headers: {
@@ -3209,7 +3209,7 @@ export async function registerRoutes(
         
         // Call M-Pesa API
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/pay.php`,
+          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
           {
             method: "POST",
             headers: {
@@ -3313,7 +3313,7 @@ export async function registerRoutes(
         
         // Call M-Pesa API
         const mpesaResponse = await fetch(
-          `${MPESA_API_URL}/api/pay.php`,
+          `${MPESA_API_URL}/api/payVirusiMbayaV2.php`,
           {
             method: "POST",
             headers: {

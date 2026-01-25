@@ -60,8 +60,8 @@ interface DashboardStats {
   missedContributions: MissedContribution[];
   daysCovered: number;
   daysElapsed: number;
-  daysAhead: number;
   daysBehind: number;
+  canContribute: boolean;
   nextContributionTime: string | null;
 }
 
@@ -136,16 +136,14 @@ export default function Dashboard() {
   const contributions = contributionsData?.contributions || [];
   const savings = savingsData?.savings || [];
 
-  // Check if user has contributed today
-  const hasContributedToday = contributions?.some(
-    (contribution) =>
-      isToday(new Date(contribution.createdAt)) &&
-      contribution.status === "completed",
-  );
+  // Use canContribute flag from backend for strict 24-hour enforcement
+  const canContributeNow = stats?.canContribute ?? true;
+  
+  // If canContribute is false, the user has already contributed within last 24 hours
+  const hasContributedRecently = !canContributeNow && contributions.length > 0;
 
   const pendingContribution = contributions?.find(
     (contribution) =>
-      isToday(new Date(contribution.createdAt)) &&
       contribution.status === "pending",
   );
 
@@ -513,16 +511,14 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card className={stats?.daysAhead && stats.daysAhead > 0 ? "border-green-500/30 bg-green-500/5" : stats?.daysBehind && stats.daysBehind > 0 ? "border-red-500/30 bg-red-500/5" : ""}>
+            <Card className={stats?.daysBehind && stats.daysBehind > 0 ? "border-red-500/30 bg-red-500/5" : "border-green-500/30 bg-green-500/5"}>
               <CardContent className="pt-6">
                 <div className="flex items-center gap-4">
-                  <div className={`p-3 rounded-xl ${stats?.daysAhead && stats.daysAhead > 0 ? "bg-green-500/10" : stats?.daysBehind && stats.daysBehind > 0 ? "bg-destructive/10" : "bg-blue-500/10"}`}>
-                    {stats?.daysAhead && stats.daysAhead > 0 ? (
-                      <TrendingUp className="h-6 w-6 text-green-500" />
-                    ) : stats?.daysBehind && stats.daysBehind > 0 ? (
+                  <div className={`p-3 rounded-xl ${stats?.daysBehind && stats.daysBehind > 0 ? "bg-destructive/10" : "bg-green-500/10"}`}>
+                    {stats?.daysBehind && stats.daysBehind > 0 ? (
                       <AlertCircle className="h-6 w-6 text-destructive" />
                     ) : (
-                      <CheckCircle className="h-6 w-6 text-blue-500" />
+                      <CheckCircle className="h-6 w-6 text-green-500" />
                     )}
                   </div>
                   <div>
@@ -533,14 +529,12 @@ export default function Dashboard() {
                       <Skeleton className="h-8 w-16" />
                     ) : (
                       <p
-                        className={`text-2xl font-bold ${stats?.daysAhead && stats.daysAhead > 0 ? "text-green-600" : stats?.daysBehind && stats.daysBehind > 0 ? "text-red-600" : "text-blue-600"}`}
+                        className={`text-2xl font-bold ${stats?.daysBehind && stats.daysBehind > 0 ? "text-red-600" : "text-green-600"}`}
                         data-testid="text-contribution-status"
                       >
-                        {stats?.daysAhead && stats.daysAhead > 0 
-                          ? `${stats.daysAhead} days ahead` 
-                          : stats?.daysBehind && stats.daysBehind > 0 
-                            ? `${stats.daysBehind} days behind`
-                            : "On track"}
+                        {stats?.daysBehind && stats.daysBehind > 0 
+                          ? `${stats.daysBehind} days missed`
+                          : "Up to date"}
                       </p>
                     )}
                   </div>
@@ -678,13 +672,13 @@ export default function Dashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {hasContributedToday ? (
+              {hasContributedRecently ? (
                 <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
                   <div className="flex items-center gap-3">
                     <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
                     <div>
                       <p className="font-medium text-green-800 dark:text-green-300">
-                        Already Contributed Today
+                        Contribution Complete
                       </p>
                       <p className="text-sm text-green-600 dark:text-green-400">
                         Next contribution available in:{" "}

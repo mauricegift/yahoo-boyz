@@ -749,11 +749,7 @@ export async function registerRoutes(
         const missedContributions =
           await storage.getUnpaidMissedContributions(userId);
 
-        // Calculate contribution days tracking
-        const totalContributed = Number(userTotal) || 0;
-        const daysCovered = Math.floor(totalContributed / 20); // Each 20 Ksh covers 1 day
-
-        // Get the first contribution date or account creation date
+        // Get the contribution records for tracking
         const contributions = await storage.getContributionsByUserId(
           userId,
           1000,
@@ -762,11 +758,15 @@ export async function registerRoutes(
         const completedContributions = contributions.filter(
           (c) => c.status === "completed",
         );
+        
+        // daysCovered = sum of completed contribution amounts / 20 (not affected by admin adjustments to totalContributions)
+        const totalFromRecords = completedContributions.reduce((sum, c) => sum + Number(c.amount), 0);
+        const daysCovered = Math.floor(totalFromRecords / 20);
 
         let daysElapsed = 0;
-        let daysAhead = 0;
         let daysBehind = 0;
         let nextContributionTime: Date | null = null;
+        let canContribute = true;
 
         const now = new Date();
 
@@ -785,6 +785,9 @@ export async function registerRoutes(
             );
           }
 
+          // Check if 24 hours have passed since last contribution
+          canContribute = now >= nextContributionTime;
+
           // Calculate days since first contribution
           const firstContribution =
             completedContributions[completedContributions.length - 1];
@@ -792,18 +795,15 @@ export async function registerRoutes(
           const diffTime = now.getTime() - firstDate.getTime();
           daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 because the first day counts
         } else if (user) {
-          // No contributions yet - calculate days since account creation
+          // No contributions yet - calculate days since account creation (from day one, no grace period)
           const accountCreatedDate = new Date(user.createdAt);
           const diffTime = now.getTime() - accountCreatedDate.getTime();
-          daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 because the first day counts
+          // Days elapsed starts at 0 on join day, then 1 after 24 hours, etc.
+          daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24));
         }
 
-        // Calculate days ahead or behind
-        if (daysCovered >= daysElapsed) {
-          daysAhead = daysCovered - daysElapsed;
-        } else {
-          daysBehind = daysElapsed - daysCovered;
-        }
+        // Calculate only days behind (missed days) - no days ahead allowed
+        daysBehind = Math.max(0, daysElapsed - daysCovered);
 
         // Ensure all values are numbers
         res.json({
@@ -816,11 +816,10 @@ export async function registerRoutes(
           activeLoans,
           pendingContributions: 0,
           missedContributions,
-          // New contribution tracking fields
           daysCovered,
           daysElapsed,
-          daysAhead,
           daysBehind,
+          canContribute,
           nextContributionTime: nextContributionTime?.toISOString() || null,
         });
       } catch (error: any) {
@@ -1242,15 +1241,16 @@ export async function registerRoutes(
           await storage.getUnpaidMissedContributions(userId);
 
         // Calculate days behind/ahead (same as Dashboard)
-        const totalContributed = Number(userTotal) || 0;
-        const daysCovered = Math.floor(totalContributed / 20);
         const completedContributions = contributions.filter(
           (c) => c.status === "completed",
         );
+        // daysCovered = sum of completed contribution amounts / 20 (not affected by admin adjustments to totalContributions)
+        const totalFromRecords = completedContributions.reduce((sum, c) => sum + Number(c.amount), 0);
+        const daysCovered = Math.floor(totalFromRecords / 20);
 
         let daysElapsed = 0;
-        let daysAhead = 0;
         let daysBehind = 0;
+        let canContribute = true;
 
         if (completedContributions.length > 0) {
           const firstContribution =
@@ -1259,18 +1259,17 @@ export async function registerRoutes(
           const diffTime = now.getTime() - firstDate.getTime();
           daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
         } else if (user) {
+          // No contributions yet - calculate days since account creation (from day one, no grace period)
           const accountCreatedDate = new Date(user.createdAt);
           const diffTime = now.getTime() - accountCreatedDate.getTime();
-          daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+          // Days elapsed starts at 0 on join day, then 1 after 24 hours, etc.
+          daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24));
         }
 
-        if (daysCovered >= daysElapsed) {
-          daysAhead = daysCovered - daysElapsed;
-        } else {
-          daysBehind = daysElapsed - daysCovered;
-        }
+        // Calculate only days behind (missed days) - no days ahead allowed
+        daysBehind = Math.max(0, daysElapsed - daysCovered);
 
-        // Calculate nextContributionTime (same as Dashboard)
+        // Calculate nextContributionTime and canContribute
         let nextContributionTime: Date | null = null;
         if (completedContributions.length > 0) {
           const lastContribution = completedContributions[0];
@@ -1280,6 +1279,7 @@ export async function registerRoutes(
             nextContributionTime = new Date(lastContribution.createdAt);
             nextContributionTime.setTime(nextContributionTime.getTime() + 24 * 60 * 60 * 1000);
           }
+          canContribute = now >= nextContributionTime;
         }
 
         res.json({
@@ -1289,9 +1289,9 @@ export async function registerRoutes(
           missedCount: missedContributions.length,
           daysCovered,
           daysElapsed,
-          daysAhead,
           daysBehind,
           missedAmount: daysBehind * 20,
+          canContribute,
           nextContributionTime: nextContributionTime?.toISOString() || null,
         });
       } catch (error: any) {
@@ -1337,12 +1337,13 @@ export async function registerRoutes(
           });
         }
 
-        // Check if user can contribute (24 hours have passed)
-        const lastContribution = await storage.getLastContribution(
+        // Check if user can contribute (24 hours have passed since last COMPLETED contribution)
+        // Failed/pending contributions should NOT block retries
+        const lastCompletedContribution = await storage.getLastCompletedContribution(
           req.user!.id,
         );
-        if (lastContribution?.nextContributionTime) {
-          const nextTime = new Date(lastContribution.nextContributionTime);
+        if (lastCompletedContribution?.nextContributionTime) {
+          const nextTime = new Date(lastCompletedContribution.nextContributionTime);
           if (nextTime > new Date()) {
             return res.status(400).json({
               message: "You can only contribute once every 24 hours",
@@ -1487,6 +1488,131 @@ export async function registerRoutes(
         res.status(500).json({
           success: false,
           message: error.message || "Failed to initiate contribution",
+        });
+      }
+    },
+  );
+
+  // Retry a failed contribution (updates existing record instead of creating new)
+  app.post(
+    "/api/contributions/:id/retry",
+    authMiddleware,
+    async (req: AuthRequest, res: Response) => {
+      try {
+        const contributionId = parseInt(req.params.id);
+        const { phone } = req.body;
+        const phoneNumber = phone || req.user!.phone;
+
+        if (!phoneNumber) {
+          return res.status(400).json({
+            message: "Phone number is required",
+            success: false,
+          });
+        }
+
+        // Get the existing contribution
+        const contribution = await storage.getContributionById(contributionId);
+        if (!contribution) {
+          return res.status(404).json({
+            message: "Contribution not found",
+            success: false,
+          });
+        }
+
+        // Verify the contribution belongs to this user
+        if (contribution.userId !== req.user!.id) {
+          return res.status(403).json({
+            message: "Unauthorized",
+            success: false,
+          });
+        }
+
+        // Only allow retry on failed or cancelled contributions
+        if (contribution.status !== "failed" && contribution.status !== "cancelled") {
+          return res.status(400).json({
+            message: "Can only retry failed or cancelled contributions",
+            success: false,
+          });
+        }
+
+        // Check if user already has a completed contribution in the last 24 hours
+        const lastCompletedContribution = await storage.getLastCompletedContribution(req.user!.id);
+        if (lastCompletedContribution?.nextContributionTime) {
+          const nextTime = new Date(lastCompletedContribution.nextContributionTime);
+          if (nextTime > new Date()) {
+            return res.status(400).json({
+              message: "You can only contribute once every 24 hours",
+              success: false,
+            });
+          }
+        }
+
+        // Update the contribution to pending and set new nextContributionTime
+        const nextContributionTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        await storage.updateContribution(contributionId, {
+          status: "pending",
+          errorMessage: null,
+          nextContributionTime,
+        });
+
+        // Format phone number
+        let formattedPhone = String(phoneNumber).trim();
+        formattedPhone = formattedPhone.replace(/[^\d+]/g, "");
+        formattedPhone = formattedPhone.replace(/\+/g, "");
+
+        if (formattedPhone.startsWith("0")) {
+          formattedPhone = "254" + formattedPhone.substring(1);
+        } else if (formattedPhone.startsWith("7") && formattedPhone.length === 9) {
+          formattedPhone = "254" + formattedPhone;
+        } else if (!formattedPhone.startsWith("254")) {
+          formattedPhone = "254" + formattedPhone;
+        }
+
+        const amountNum = parseFloat(contribution.amount);
+
+        // Initiate M-Pesa payment
+        const response = await fetch(`${MPESA_API_URL}/api/initiate-stk-push.php`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone: formattedPhone,
+            amount: Math.round(amountNum),
+            accountReference: `YAHOOBOYZ-${contributionId}`,
+            transactionDesc: "Daily Contribution Retry",
+          }),
+        });
+
+        const result = await response.json();
+        console.log("M-Pesa retry response:", JSON.stringify(result, null, 2));
+
+        if (result.success && result.CheckoutRequestID) {
+          await storage.updateContribution(contributionId, {
+            checkoutRequestId: result.CheckoutRequestID,
+          });
+
+          setTimeout(() => checkPaymentStatus(result.CheckoutRequestID), 15000);
+
+          res.json({
+            success: true,
+            checkoutRequestId: result.CheckoutRequestID,
+            contributionId: contributionId,
+            message: "Payment initiated successfully. Check your phone for M-Pesa prompt.",
+          });
+        } else {
+          await storage.updateContribution(contributionId, {
+            status: "failed",
+            errorMessage: result.message || "Failed to initiate payment",
+          });
+          return res.json({
+            success: false,
+            message: result.message || "Failed to initiate M-Pesa payment",
+          });
+        }
+      } catch (error: any) {
+        console.error("M-Pesa retry error:", error);
+        res.status(500).json({
+          success: false,
+          message: error.message || "Failed to retry contribution",
         });
       }
     },
@@ -2648,10 +2774,6 @@ export async function registerRoutes(
         // Add contribution tracking info for each user
         const usersWithTracking = await Promise.all(
           users.map(async ({ password, ...user }) => {
-            // Use user.totalContributions / 20 for daysCovered (consistent with Dashboard and Contributions page)
-            const totalContributed = Number(user.totalContributions) || 0;
-            const daysCovered = Math.floor(totalContributed / 20);
-
             // Calculate days elapsed since first contribution OR account creation
             const contributions = await storage.getContributionsByUserId(
               user.id,
@@ -2659,6 +2781,9 @@ export async function registerRoutes(
             const completedContributions = contributions.filter(
               (c) => c.status === "completed",
             );
+            // daysCovered = sum of completed contribution amounts / 20 (not affected by admin adjustments to totalContributions)
+            const totalFromRecords = completedContributions.reduce((sum, c) => sum + Number(c.amount), 0);
+            const daysCovered = Math.floor(totalFromRecords / 20);
 
             let daysElapsed = 0;
             const now = new Date();
@@ -2671,14 +2796,15 @@ export async function registerRoutes(
               const diffTime = now.getTime() - firstDate.getTime();
               daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
             } else {
-              // No contributions yet - calculate days since account creation
+              // No contributions yet - calculate days since account creation (from day one, no grace period)
               const accountCreatedDate = new Date(user.createdAt);
               const diffTime = now.getTime() - accountCreatedDate.getTime();
-              daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+              // Days elapsed starts at 0 on join day, then 1 after 24 hours, etc.
+              daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24));
             }
 
+            // Calculate only days behind (missed days) - no days ahead concept
             const daysBehind = Math.max(0, daysElapsed - daysCovered);
-            const daysAhead = Math.max(0, daysCovered - daysElapsed);
             const missedAmount = daysBehind * 20;
 
             return {
@@ -2686,7 +2812,6 @@ export async function registerRoutes(
               daysCovered,
               daysElapsed,
               daysBehind,
-              daysAhead,
               missedAmount,
             };
           }),
@@ -2727,11 +2852,18 @@ export async function registerRoutes(
           return res.status(404).json({ message: "User not found" });
         }
 
-        // Superadmins cannot be modified by anyone (except themselves for profile updates)
-        if (user.role === "superadmin") {
+        // Superadmins can only be modified by themselves
+        if (user.role === "superadmin" && req.user!.id !== userId) {
           return res
             .status(403)
-            .json({ message: "Superadmin account cannot be modified" });
+            .json({ message: "Superadmin account cannot be modified by others" });
+        }
+
+        // When superadmin edits themselves, prevent role change
+        if (user.role === "superadmin" && req.user!.id === userId && role !== undefined && role !== "superadmin") {
+          return res
+            .status(403)
+            .json({ message: "Superadmin cannot change their own role" });
         }
 
         // Admins can edit basic user info and financial data

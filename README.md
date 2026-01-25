@@ -241,35 +241,194 @@ Main tables:
 
 ## API Endpoints
 
+All endpoints return JSON. Protected routes require `Authorization: Bearer <token>` header.
+
 ### Authentication
-- `POST /api/auth/register` - Register new user
-- `POST /api/auth/login` - User login
-- `POST /api/auth/verify-otp` - Verify OTP code
-- `POST /api/auth/forgot-password` - Request password reset
-- `POST /api/auth/reset-password` - Reset password
 
-### User
-- `GET /api/user/me` - Get current user profile
-- `PUT /api/user/profile` - Update profile
-- `PUT /api/user/password` - Change password
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `POST` | `/api/auth/signup` | Register new user. First user becomes superadmin. | No |
+| `POST` | `/api/auth/login` | Login with phone/email and password | No |
+| `POST` | `/api/auth/verify` | Verify OTP code for registration/login | No |
+| `POST` | `/api/auth/resend-code` | Resend OTP to user's phone/email | No |
+| `POST` | `/api/auth/forgot-password` | Request password reset OTP | No |
+| `POST` | `/api/auth/reset-password` | Reset password with OTP | No |
 
-### Contributions & Savings
-- `GET /api/contributions` - Get user contributions
-- `POST /api/contributions` - Make contribution
-- `GET /api/savings` - Get user savings
-- `POST /api/savings/deposit` - Make deposit
-- `POST /api/savings/withdraw` - Request withdrawal
+**Register Request:**
+```json
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "phone": "0712345678",
+  "password": "SecurePass123!"
+}
+```
 
-### Loans
-- `GET /api/loans` - Get user loans
-- `POST /api/loans` - Apply for loan
-- `GET /api/loans/:id` - Get loan details
+**Login Request:**
+```json
+{
+  "identifier": "0712345678",
+  "password": "SecurePass123!"
+}
+```
 
-### Admin
-- `GET /api/admin/users` - List all users
-- `PUT /api/admin/users/:id` - Update user
-- `GET /api/admin/loans` - List all loans
-- `PUT /api/admin/loans/:id` - Update loan status
+### User Profile
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/api/user/me` | Get current user profile with financial totals | Yes |
+| `PATCH` | `/api/user/profile` | Update profile (name, email, phone, profile picture) | Yes |
+| `PATCH` | `/api/user/password` | Change password | Yes |
+
+### Contributions (Daily Ksh 20)
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/api/contributions` | Get user's contribution history | Yes |
+| `POST` | `/api/contributions` | Initiate M-Pesa contribution (Ksh 20). Limited to once per 24 hours. | Yes |
+| `POST` | `/api/contributions/callback` | M-Pesa payment callback (internal) | No |
+
+**Contribution Response includes:**
+- `nextContributionTime`: ISO timestamp when user can contribute again (strict 24-hour limit)
+- `canContribute`: Boolean flag - true if 24 hours have passed since last contribution
+- `daysCovered`: Number of days fully paid
+- `daysBehind`: Number of missed days (no "days ahead" concept - contributions are strictly daily)
+- `missedAmount`: Amount owed for missed days (daysBehind × 20)
+
+**24-Hour Contribution Limit:**
+- Users can only contribute once every 24 hours (strictly enforced by backend)
+- Attempting to contribute before 24 hours returns error: "You can only contribute once every 24 hours"
+- Frontend shows countdown timer when contribution is not available
+
+### Savings
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/api/savings` | Get savings transaction history | Yes |
+| `POST` | `/api/savings/deposit` | Initiate M-Pesa savings deposit | Yes |
+| `POST` | `/api/savings/withdraw` | Request savings withdrawal (requires active loan status) | Yes |
+
+**Deposit Request:**
+```json
+{
+  "amount": 500
+}
+```
+
+### Loans (15% Interest Rate)
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/api/loans` | Get user's loan applications | Yes |
+| `POST` | `/api/loans` | Apply for loan with guarantors | Yes |
+| `GET` | `/api/loans/:id` | Get specific loan details | Yes |
+| `POST` | `/api/loans/:id/repay` | Make loan repayment via M-Pesa | Yes |
+| `GET` | `/api/loans/available-guarantors` | List eligible guarantors (users with savings) | Yes |
+
+**Loan Application Request:**
+```json
+{
+  "amount": 1000,
+  "purpose": "Business investment",
+  "guarantorIds": [2, 5]
+}
+```
+
+**Loan Requirements:**
+- Minimum 2 guarantors required
+- Each guarantor must have sufficient savings to cover their guarantee portion
+- Maximum loan amount: 3x user's total contributions
+- Interest rate: 15% flat
+- Repayment period: 30 days
+
+### Loan Guarantors
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/api/guarantor/requests` | Get pending guarantor requests for current user | Yes |
+| `POST` | `/api/guarantor/respond` | Accept or reject guarantor request | Yes |
+
+**Respond to Guarantor Request:**
+```json
+{
+  "loanGuarantorId": 123,
+  "action": "approve"
+}
+```
+
+### Contact Messages
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/api/contact/messages` | Get user's sent messages with replies | Yes |
+| `POST` | `/api/contact/messages` | Send message to admin | Yes |
+
+**Send Message Request:**
+```json
+{
+  "subject": "Help with contribution",
+  "message": "I need assistance with my daily contribution..."
+}
+```
+
+### Admin Routes (Admin/Superadmin Only)
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `GET` | `/api/admin/stats` | Platform statistics (members, totals, pending items) | Admin |
+| `GET` | `/api/admin/users` | List all users with contribution tracking | Admin |
+| `PATCH` | `/api/admin/users/:id` | Update user details (name, email, phone, totals) | Admin |
+| `PATCH` | `/api/admin/users/:id/role` | Change user role (user/admin) | Superadmin |
+| `DELETE` | `/api/admin/users/:id` | Delete user account | Superadmin |
+| `GET` | `/api/admin/loans` | List all loans with guarantor details | Admin |
+| `GET` | `/api/admin/loans/pending` | List pending loan applications | Admin |
+| `PATCH` | `/api/admin/loans/:id` | Approve/reject loan application | Admin |
+| `GET` | `/api/admin/contact/messages` | List all contact messages | Admin |
+| `POST` | `/api/admin/contact/messages/:id/reply` | Reply to contact message | Admin |
+
+**Update User (Admin):**
+```json
+{
+  "name": "Updated Name",
+  "email": "newemail@example.com",
+  "phone": "0722222222",
+  "totalContributions": "500",
+  "totalSavings": "1000",
+  "totalLoans": "0",
+  "isVerified": true,
+  "isDisabled": false
+}
+```
+
+**Approve Loan (Admin):**
+```json
+{
+  "status": "approved"
+}
+```
+
+### Superadmin Permissions
+
+- Superadmins can edit their own profile (name, email, phone, financial totals) but cannot change their role
+- Superadmins cannot be modified or deleted by other admins
+- Only superadmins can disable users or change user roles
+- First registered user automatically becomes superadmin
+
+### Error Responses
+
+All error responses follow this format:
+```json
+{
+  "message": "Error description here"
+}
+```
+
+Common HTTP status codes:
+- `400` - Bad Request (validation error, invalid data)
+- `401` - Unauthorized (missing or invalid token)
+- `403` - Forbidden (insufficient permissions)
+- `404` - Not Found (resource doesn't exist)
+- `429` - Too Many Requests (rate limited, e.g., daily contribution limit)
 
 ## Security Features
 

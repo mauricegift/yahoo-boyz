@@ -69,6 +69,7 @@ export interface IStorage {
   ): Promise<Contribution | undefined>;
   getTotalContributionsCount(userId: number): Promise<number>;
   getLastContribution(userId: number): Promise<Contribution | undefined>;
+  getLastCompletedContribution(userId: number): Promise<Contribution | undefined>;
 
   // Savings
   createSaving(data: InsertSaving): Promise<Saving>;
@@ -324,6 +325,16 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(contributions)
       .where(eq(contributions.userId, userId))
+      .orderBy(desc(contributions.createdAt))
+      .limit(1);
+    return cont || undefined;
+  }
+
+  async getLastCompletedContribution(userId: number): Promise<Contribution | undefined> {
+    const [cont] = await db
+      .select()
+      .from(contributions)
+      .where(and(eq(contributions.userId, userId), eq(contributions.status, "completed")))
       .orderBy(desc(contributions.createdAt))
       .limit(1);
     return cont || undefined;

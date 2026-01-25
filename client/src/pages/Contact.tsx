@@ -11,6 +11,7 @@ import {
   Clock,
   CheckCircle,
   XCircle,
+  RefreshCw,
 } from "lucide-react";
 import { ScrollAnimation } from "@/components/ui/scroll-animation";
 import { toast } from "react-toastify";
@@ -31,7 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
-import { useAuth, getAuthHeader } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
 import { apiRequest } from "@/lib/queryClient";
 import { contactFormSchema, type ContactMessage } from "@shared/schema";
 import { format } from "date-fns";
@@ -267,59 +268,23 @@ export default function Contact() {
                 </div>
               </ScrollAnimation>
 
-              {/* Grid Item 3: FAQ */}
+              {/* Grid Item 3: Message History - Shows first on mobile */}
               <ScrollAnimation animation="fade-right" delay={200}>
-                <div className="col-span-1">
-                <Card className="h-full">
-                  <CardContent className="pt-6 h-full">
-                    <h3 className="font-semibold text-lg mb-4">
-                      Frequently Asked
-                    </h3>
-                    <div className="space-y-4">
-                      <div>
-                        <p className="font-medium text-sm">How do I join?</p>
-                        <p className="text-sm text-muted-foreground">
-                          Simply create an account and start contributing Ksh 20
-                          daily.
-                        </p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-sm">Can someone save?</p>
-                        <p className="text-sm text-muted-foreground">
-                          Yes you can save amount of your choice at any time of
-                          the day(unlimited).
-                        </p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-sm">
-                          How do I get a loan?
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Apply through your dashboard. Our admin team reviews
-                          applications promptly.
-                        </p>
-                      </div>
-                      <div>
-                        <p className="font-medium text-sm">
-                          What's the interest rate?
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          All loans have a fixed 15% interest rate.
-                        </p>
-                      </div>
-                    </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </ScrollAnimation>
-
-              {/* Grid Item 4: Message History */}
-              <ScrollAnimation animation="fade-left" delay={300}>
-                <div className="col-span-1">
+                <div className="col-span-1 order-first md:order-none">
                 {isAuthenticated && (
                   <Card className="h-full">
                     <CardContent className="pt-6 h-full">
-                      <h2 className="text-xl font-bold mb-6">Your Messages</h2>
+                      <div className="flex items-center justify-between mb-6">
+                        <h2 className="text-xl font-bold">Your Messages</h2>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/contact/messages"] })}
+                          disabled={messagesLoading}
+                        >
+                          <RefreshCw className={`h-4 w-4 ${messagesLoading ? "animate-spin" : ""}`} />
+                        </Button>
+                      </div>
                       {messagesLoading ? (
                         <div className="space-y-4">
                           {[1, 2, 3].map((i) => (
@@ -405,6 +370,52 @@ export default function Contact() {
                     </CardContent>
                   </Card>
                   )}
+                </div>
+              </ScrollAnimation>
+
+              {/* Grid Item 4: FAQ */}
+              <ScrollAnimation animation="fade-left" delay={300}>
+                <div className="col-span-1">
+                <Card className="h-full">
+                  <CardContent className="pt-6 h-full">
+                    <h3 className="font-semibold text-lg mb-4">
+                      Frequently Asked
+                    </h3>
+                    <div className="space-y-4">
+                      <div>
+                        <p className="font-medium text-sm">How do I join?</p>
+                        <p className="text-sm text-muted-foreground">
+                          Simply create an account and start contributing Ksh 20
+                          daily.
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm">Can someone save?</p>
+                        <p className="text-sm text-muted-foreground">
+                          Yes you can save amount of your choice at any time of
+                          the day(unlimited).
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm">
+                          How do I get a loan?
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Apply through your dashboard. Our admin team reviews
+                          applications promptly.
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-medium text-sm">
+                          What's the interest rate?
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          All loans have a fixed 15% interest rate.
+                        </p>
+                      </div>
+                    </div>
+                    </CardContent>
+                  </Card>
                 </div>
               </ScrollAnimation>
             </div>

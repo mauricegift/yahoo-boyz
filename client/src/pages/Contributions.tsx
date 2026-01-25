@@ -47,9 +47,9 @@ interface ContributionStats {
   missedCount: number;
   daysCovered: number;
   daysElapsed: number;
-  daysAhead: number;
   daysBehind: number;
   missedAmount: number;
+  canContribute: boolean;
   nextContributionTime: string | null;
 }
 
@@ -107,17 +107,17 @@ export default function Contributions() {
     queryKey: ["/api/contributions/missed"],
   });
 
-  // Check if user has contributed today
+  // Check if user can contribute (strict 24-hour rule from backend)
   const contributions = contributionsData?.contributions || [];
-  const hasContributedToday = contributions?.some(
-    (contribution) =>
-      isToday(new Date(contribution.createdAt)) &&
-      contribution.status === "completed",
-  );
+  
+  // Use canContribute flag from backend for strict 24-hour enforcement
+  const canContributeNow = stats?.canContribute ?? true;
+  
+  // If canContribute is false, the user has already contributed within last 24 hours
+  const hasContributedRecently = !canContributeNow && contributions.length > 0;
 
   const pendingContribution = contributions?.find(
     (contribution) =>
-      isToday(new Date(contribution.createdAt)) &&
       contribution.status === "pending",
   );
 
@@ -159,6 +159,34 @@ export default function Contributions() {
           closeButton: true,
         });
         setPaymentDialogOpen(false);
+        queryClient.invalidateQueries({
+          queryKey: ["/api/contributions/user"],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["/api/contributions/stats"],
+        });
+      } else {
+        toast.error(data.message || "Failed to initiate payment", {
+          closeButton: true,
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "Failed to initiate payment", {
+        closeButton: true,
+      });
+    },
+  });
+
+  const retryMutation = useMutation({
+    mutationFn: async (data: { contributionId: number; phone?: string }) => {
+      return apiRequest("POST", `/api/contributions/${data.contributionId}/retry`, { phone: data.phone });
+    },
+    onSuccess: (data) => {
+      if (data.success && data.checkoutRequestId) {
+        toast.success(data.message || "Check your phone for M-Pesa prompt", {
+          closeButton: true,
+        });
         setRetryDialogOpen(false);
         setSelectedContributionId(null);
         queryClient.invalidateQueries({
@@ -299,16 +327,16 @@ export default function Contributions() {
             </div>
 
             {/* Status Messages */}
-            {hasContributedToday ? (
+            {hasContributedRecently ? (
               <div className="p-3 sm:p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
                 <div className="flex items-center gap-3">
                   <CheckCircle className="h-5 w-5 flex-shrink-0 text-green-600 dark:text-green-400" />
                   <div className="min-w-0">
                     <p className="font-medium text-green-800 dark:text-green-300 text-sm sm:text-base">
-                      Already Contributed Today
+                      Contribution Complete
                     </p>
                     <p className="text-xs sm:text-sm text-green-600 dark:text-green-400">
-                      Next contribution in:{" "}
+                      Next contribution available in:{" "}
                       <span className="font-bold">
                         {timeUntilNextContribution || "Loading..."}
                       </span>
@@ -974,18 +1002,20 @@ export default function Contributions() {
             </div>
             <Button
               className="w-full gap-2"
-              onClick={() =>
-                contributeMutation.mutate({
-                  amount: 20,
-                  phone: phoneNumber,
-                })
-              }
-              disabled={contributeMutation.isPending}
+              onClick={() => {
+                if (selectedContributionId) {
+                  retryMutation.mutate({
+                    contributionId: selectedContributionId,
+                    phone: phoneNumber,
+                  });
+                }
+              }}
+              disabled={retryMutation.isPending || !selectedContributionId}
             >
-              {contributeMutation.isPending && (
+              {retryMutation.isPending && (
                 <RefreshCw className="h-4 w-4 animate-spin" />
               )}
-              {contributeMutation.isPending
+              {retryMutation.isPending
                 ? "Sending M-Pesa request..."
                 : "Retry with M-Pesa"}
             </Button>

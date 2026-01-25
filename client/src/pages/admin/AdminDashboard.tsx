@@ -66,6 +66,7 @@ import {
 } from "@/components/ui/dialog";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/lib/auth";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -92,10 +93,10 @@ interface User {
   totalSavings: string;
   totalLoans: string;
   createdAt: string;
+  profilePicture?: string;
   daysCovered?: number;
   daysElapsed?: number;
   daysBehind?: number;
-  daysAhead?: number;
   missedAmount?: number;
 }
 
@@ -579,28 +580,39 @@ export default function AdminPage() {
     const name = formData.get("name") as string;
     const email = formData.get("email") as string;
     const phone = formData.get("phone") as string;
-    const role = formData.get("role") as string;
+    const roleValue = formData.get("role");
     const isVerified = formData.get("isVerified") === "true";
-    const isDisabled = formData.get("isDisabled") === "true";
+    const isDisabledValue = formData.get("isDisabled");
     const totalContributions =
       parseFloat(formData.get("totalContributions") as string) || 0;
     const totalSavings =
       parseFloat(formData.get("totalSavings") as string) || 0;
     const totalLoans = parseFloat(formData.get("totalLoans") as string) || 0;
 
+    // Build data object - only include role if it was in the form (not for superadmin editing themselves)
+    const data: Record<string, any> = {
+      name,
+      email,
+      phone,
+      isVerified,
+      totalContributions: totalContributions.toString(),
+      totalSavings: totalSavings.toString(),
+      totalLoans: totalLoans.toString(),
+    };
+
+    // Only include role if the field exists in form (not superadmin editing self)
+    if (roleValue !== null) {
+      data.role = roleValue as "user" | "admin" | "superadmin";
+    }
+
+    // Only include isDisabled if the field exists in form (superadmin editing non-superadmin)
+    if (isDisabledValue !== null) {
+      data.isDisabled = isDisabledValue === "true";
+    }
+
     updateUserMutation.mutate({
       userId: selectedUser.id,
-      data: {
-        name,
-        email,
-        phone,
-        role: role as "user" | "admin" | "superadmin" | undefined,
-        isVerified,
-        isDisabled,
-        totalContributions: totalContributions.toString(),
-        totalSavings: totalSavings.toString(),
-        totalLoans: totalLoans.toString(),
-      },
+      data,
     });
   };
 
@@ -1144,57 +1156,60 @@ export default function AdminPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredUsers.slice((usersPage - 1) * PAGE_SIZE, usersPage * PAGE_SIZE).map((user) => (
-                          <TableRow key={user.id}>
+                        {filteredUsers.slice((usersPage - 1) * PAGE_SIZE, usersPage * PAGE_SIZE).map((tableUser) => (
+                          <TableRow key={tableUser.id}>
                             <TableCell>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <div className="font-medium">{user.name}</div>
-                                {!user.isVerified && (
-                                  <Badge variant="outline" className="text-xs">
-                                    Unverified
-                                  </Badge>
-                                )}
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-10 w-10">
+                                  <AvatarImage src={tableUser.profilePicture || undefined} alt={tableUser.name || 'User'} />
+                                  <AvatarFallback className="bg-primary/10 text-primary">
+                                    {(tableUser.name || 'U').split(' ').map(n => n[0] || '').join('').toUpperCase().slice(0, 2) || 'U'}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="flex flex-col gap-1">
+                                  <div className="font-medium">{tableUser.name}</div>
+                                  {!tableUser.isVerified && (
+                                    <Badge variant="outline" className="text-xs w-fit">
+                                      Unverified
+                                    </Badge>
+                                  )}
+                                </div>
                               </div>
                             </TableCell>
-                            <TableCell>{user.email}</TableCell>
-                            <TableCell>{user.phone}</TableCell>
+                            <TableCell>{tableUser.email}</TableCell>
+                            <TableCell>{tableUser.phone}</TableCell>
                             <TableCell>
                               <Badge
                                 variant={
-                                  user.role === "superadmin"
+                                  tableUser.role === "superadmin"
                                     ? "default"
-                                    : user.role === "admin"
+                                    : tableUser.role === "admin"
                                       ? "secondary"
                                       : "outline"
                                 }
                               >
-                                {user.role}
+                                {tableUser.role}
                               </Badge>
                             </TableCell>
                             <TableCell>
                               <Badge
-                                variant={user.isDisabled ? "destructive" : "default"}
-                                className={!user.isDisabled ? "bg-green-600" : ""}
+                                variant={tableUser.isDisabled ? "destructive" : "default"}
+                                className={!tableUser.isDisabled ? "bg-green-600" : ""}
                               >
-                                {user.isDisabled ? "Inactive" : "Active"}
+                                {tableUser.isDisabled ? "Inactive" : "Active"}
                               </Badge>
                             </TableCell>
                             <TableCell>
                               <div className="text-xs space-y-1">
-                                {user.daysBehind && user.daysBehind > 0 ? (
+                                {tableUser.daysBehind && tableUser.daysBehind > 0 ? (
                                   <div className="text-destructive">
-                                    <div className="font-medium">{user.daysBehind} days behind</div>
-                                    <div>Owes: Ksh {(user.missedAmount || 0).toLocaleString()}</div>
-                                  </div>
-                                ) : user.daysAhead && user.daysAhead > 0 ? (
-                                  <div className="text-green-600">
-                                    <div className="font-medium">{user.daysAhead} days ahead</div>
-                                    <div>{user.daysCovered || 0} days covered</div>
+                                    <div className="font-medium">{tableUser.daysBehind} days missed</div>
+                                    <div>Owes: Ksh {(tableUser.missedAmount || 0).toLocaleString()}</div>
                                   </div>
                                 ) : (
-                                  <div className="text-muted-foreground">
+                                  <div className="text-green-600">
                                     <div className="font-medium">Up to date</div>
-                                    <div>{user.daysCovered || 0} days covered</div>
+                                    <div>{tableUser.daysCovered || 0} days covered</div>
                                   </div>
                                 )}
                               </div>
@@ -1206,7 +1221,7 @@ export default function AdminPage() {
                                   <span className="font-mono">
                                     Ksh{" "}
                                     {Number(
-                                      user.totalContributions,
+                                      tableUser.totalContributions,
                                     ).toLocaleString()}
                                   </span>
                                 </div>
@@ -1214,23 +1229,23 @@ export default function AdminPage() {
                                   <span>Savings:</span>
                                   <span className="font-mono">
                                     Ksh{" "}
-                                    {Number(user.totalSavings).toLocaleString()}
+                                    {Number(tableUser.totalSavings).toLocaleString()}
                                   </span>
                                 </div>
                                 <div className="flex justify-between">
                                   <span>Loans:</span>
                                   <span className="font-mono">
                                     Ksh{" "}
-                                    {Number(user.totalLoans).toLocaleString()}
+                                    {Number(tableUser.totalLoans).toLocaleString()}
                                   </span>
                                 </div>
                               </div>
                             </TableCell>
                             <TableCell>
-                              {format(new Date(user.createdAt), "MMM d, yyyy")}
+                              {format(new Date(tableUser.createdAt), "MMM d, yyyy")}
                             </TableCell>
                             <TableCell className="text-right">
-                              {user.role === "superadmin" ? (
+                              {tableUser.role === "superadmin" && tableUser.id !== user?.id ? (
                                 <span className="text-xs text-muted-foreground">Protected</span>
                               ) : (
                                 <DropdownMenu>
@@ -1243,19 +1258,21 @@ export default function AdminPage() {
                                     <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                     <DropdownMenuItem
                                       onClick={() => {
-                                        setSelectedUser(user);
+                                        setSelectedUser(tableUser);
                                         setEditUserDialogOpen(true);
                                       }}
                                     >
                                       <Edit className="h-4 w-4 mr-2" />
                                       Edit Details
                                     </DropdownMenuItem>
+                                    {tableUser.role !== "superadmin" && (
+                                      <>
                                     <DropdownMenuSeparator />
-                                    {user.role === "user" && (
+                                    {tableUser.role === "user" && (
                                       <DropdownMenuItem
                                         onClick={() =>
                                           handleUpdateUserRole(
-                                            user.id,
+                                            tableUser.id,
                                             "admin",
                                           )
                                         }
@@ -1263,11 +1280,11 @@ export default function AdminPage() {
                                         Promote to Admin
                                       </DropdownMenuItem>
                                     )}
-                                    {user.role === "admin" && (
+                                    {tableUser.role === "admin" && (
                                       <DropdownMenuItem
                                         onClick={() =>
                                           handleUpdateUserRole(
-                                            user.id,
+                                            tableUser.id,
                                             "user",
                                           )
                                         }
@@ -1277,13 +1294,15 @@ export default function AdminPage() {
                                     )}
                                     <DropdownMenuItem
                                       onClick={() =>
-                                        handleDeleteUser(user.id, user.name)
+                                        handleDeleteUser(tableUser.id, tableUser.name)
                                       }
                                       className="text-destructive"
                                     >
                                       <Trash2 className="h-4 w-4 mr-2" />
                                       Delete User
                                     </DropdownMenuItem>
+                                      </>
+                                    )}
                                   </DropdownMenuContent>
                                 </DropdownMenu>
                               )}
